@@ -79,6 +79,7 @@ func main() {
 			Queue:           publisher,
 			Bucket:          cfg.ReportsBucket,
 			MaxUploadBytes:  cfg.MaxUploadBytes,
+			CleanupTimeout:  5 * time.Second,
 			Log:             log,
 		},
 
