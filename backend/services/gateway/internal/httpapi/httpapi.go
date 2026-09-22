@@ -42,6 +42,8 @@ func NewMux(h *Handlers) http.Handler {
 
 	mux.HandleFunc("POST /api/v1/users", h.handleRegister)
 	mux.HandleFunc("POST /api/v1/login", h.handleLogin)
+	mux.HandleFunc("POST /api/v1/refresh", h.handleRefresh)
+	mux.HandleFunc("POST /api/v1/logout", h.handleLogout)
 
 	mux.HandleFunc("GET /api/v1/me", h.requireAuth(h.handleMe))
 	mux.HandleFunc("GET /api/v1/users/{id}", h.requireAuth(h.handleGetUser))

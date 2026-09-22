@@ -21,10 +21,20 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type logoutRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 type loginResponse struct {
-	AccessToken string    `json:"access_token"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	UserID      string    `json:"user_id"`
+	AccessToken           string    `json:"access_token"`
+	ExpiresAt             time.Time `json:"expires_at"`
+	UserID                string    `json:"user_id"`
+	RefreshToken          string    `json:"refresh_token"`
+	RefreshTokenExpiresAt time.Time `json:"refresh_token_expires_at"`
 }
 
 type userResponse struct {
@@ -47,6 +57,16 @@ func toUserResponse(u *userspb.User) userResponse {
 		out.LastLogin = &t
 	}
 	return out
+}
+
+func toLoginResponse(r *userspb.LoginResponse) loginResponse {
+	return loginResponse{
+		AccessToken:           r.GetAccessToken(),
+		ExpiresAt:             r.GetExpiresAt().AsTime(),
+		UserID:                r.GetUserId(),
+		RefreshToken:          r.GetRefreshToken(),
+		RefreshTokenExpiresAt: r.GetRefreshTokenExpiresAt().AsTime(),
+	}
 }
 
 func (h *Handlers) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -87,11 +107,44 @@ func (h *Handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, h.Log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, loginResponse{
-		AccessToken: resp.GetAccessToken(),
-		ExpiresAt:   resp.GetExpiresAt().AsTime(),
-		UserID:      resp.GetUserId(),
+	writeJSON(w, http.StatusOK, toLoginResponse(resp))
+}
+
+func (h *Handlers) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+
+	resp, err := h.Upstream.Users.RefreshToken(ctx, &userspb.RefreshTokenRequest{
+		RefreshToken: req.RefreshToken,
 	})
+	if err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toLoginResponse(resp))
+}
+
+func (h *Handlers) handleLogout(w http.ResponseWriter, r *http.Request) {
+	var req logoutRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+
+	if _, err := h.Upstream.Users.Logout(ctx, &userspb.LogoutRequest{
+		RefreshToken: req.RefreshToken,
+	}); err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handlers) handleMe(w http.ResponseWriter, r *http.Request) {
