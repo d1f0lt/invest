@@ -78,6 +78,12 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		contentType = "application/octet-stream"
 	}
 
+	broker := normalizeBroker(r.FormValue("broker"))
+	if broker == "" {
+		writeError(w, http.StatusBadRequest, `missing "broker" form field`)
+		return
+	}
+
 	taskID := uuid.NewString()
 
 	objectKey := fmt.Sprintf("%s/%s_%s", portfolioID, taskID, sanitizeFilename(header.Filename))
@@ -92,6 +98,7 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		TaskID:      taskID,
 		UserID:      userID,
 		PortfolioID: portfolioID,
+		Broker:      broker,
 		Bucket:      h.Bucket,
 		ObjectKey:   objectKey,
 		Filename:    header.Filename,
@@ -105,11 +112,12 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Log.Info("report queued for parsing", "task_id", taskID, "portfolio_id", portfolioID, "user_id", userID)
+	h.Log.Info("report queued for parsing", "task_id", taskID, "portfolio_id", portfolioID, "user_id", userID, "broker", broker)
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"task_id":      taskID,
 		"portfolio_id": portfolioID,
 		"filename":     header.Filename,
+		"broker":       broker,
 		"status":       "queued",
 	})
 }
@@ -159,6 +167,12 @@ func (h *ReportsHandler) verifyOwnership(w http.ResponseWriter, ctx context.Cont
 	h.Log.Error("check portfolio ownership", "error", err)
 	writeError(w, http.StatusBadGateway, "portfolio service unavailable")
 	return false
+}
+
+func normalizeBroker(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	fields := strings.Fields(name)
+	return strings.Join(fields, "-")
 }
 
 func sanitizeFilename(name string) string {
