@@ -66,3 +66,34 @@ func TestToTradeResponse_RoundTripsAllFields(t *testing.T) {
 		t.Errorf("ExecutedAt = %v, want %v", out.ExecutedAt, executedAt)
 	}
 }
+
+func TestToPnLSummaryResponse_CarriesIncomeAndCashFields(t *testing.T) {
+	s := &portfoliopb.PnLSummary{
+		Instruments: []*portfoliopb.InstrumentPnL{{
+			Holding: &portfoliopb.Holding{Secid: "SBER", Board: "TQBR"}, Dividends: 300, Coupons: 0, AccruedInterest: -1,
+		}},
+		TotalPnl: 439, TotalDividends: 300, TotalTaxes: -50, TotalFees: -10,
+		NetDeposits: 4000, CashBalance: 1239, TotalAccruedInterest: -1, TotalCoupons: 2, TotalOther: 3,
+	}
+	out := toPnLSummaryResponse(s)
+	if out.TotalPnL != 439 || out.TotalDividends != 300 || out.TotalTaxes != -50 || out.TotalFees != -10 ||
+		out.NetDeposits != 4000 || out.CashBalance != 1239 || out.TotalAccruedInterest != -1 ||
+		out.TotalCoupons != 2 || out.TotalOther != 3 {
+		t.Errorf("summary = %+v", out)
+	}
+	if len(out.Instruments) != 1 || out.Instruments[0].Dividends != 300 || out.Instruments[0].AccruedInterest != -1 {
+		t.Errorf("instruments = %+v", out.Instruments)
+	}
+}
+
+func TestToCashOperationResponse(t *testing.T) {
+	at := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	c := &portfoliopb.CashOperation{
+		Id: "c1", Type: "dividend", Amount: 2460, Currency: "RUB", OccurredAt: timestamppb.New(at),
+		Secid: "MTSS", Board: "TQBR", Description: "Выплата дивидендов МТС. Налог удержан.", ExternalId: "sber:A:cash:x",
+	}
+	out := toCashOperationResponse(c)
+	if out.Type != "dividend" || out.Amount != 2460 || !out.OccurredAt.Equal(at) || out.SecID != "MTSS" || out.ExternalID != "sber:A:cash:x" {
+		t.Errorf("cash op = %+v", out)
+	}
+}
