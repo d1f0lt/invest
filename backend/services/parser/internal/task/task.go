@@ -9,13 +9,13 @@ type ReportUploaded struct {
 
 	PortfolioID string `json:"portfolio_id"`
 
-	// Broker is the report's broker name, chosen by the user at upload
-	// time and normalized by the gateway (lowercase, spaces -> "-").
-	// The parsing dispatcher looks up the concrete parser by this key;
-	// an empty or unknown broker fails the task (not requeued - the
-	// task will never become parseable by retrying). Added 2026-09-23;
-	// see architecture-decisions.md, "parser: асинхронный разбор
-	// отчётов".
+	
+	
+	
+	
+	
+	
+	
 	Broker string `json:"broker"`
 
 	Bucket    string `json:"bucket"`

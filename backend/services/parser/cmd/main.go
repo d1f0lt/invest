@@ -1,10 +1,10 @@
-// Command parser runs the parser worker: consumes report.uploaded tasks
-// from RabbitMQ, downloads the report from MinIO, parses it, and submits
-// the resulting trades to the portfolio service - now over gRPC
-// (invest.portfolio.v1.PortfolioService/CreateTrade), not HTTP. parser
-// itself exposes no API of its own; it only runs a gRPC health server so
-// Docker/operators have something to poll. See architecture-decisions.md,
-// "перевод внутреннего взаимодействия сервисов на gRPC".
+
+
+
+
+
+
+
 package main
 
 import (
@@ -28,6 +28,7 @@ import (
 	"invest/backend/services/parser/internal/health"
 	"invest/backend/services/parser/internal/objectstore"
 	"invest/backend/services/parser/internal/parsing"
+	"invest/backend/services/parser/internal/parsing/sber"
 	"invest/backend/services/parser/internal/portfolioclient"
 	"invest/backend/services/parser/internal/queue"
 	"invest/backend/services/parser/internal/worker"
@@ -84,14 +85,11 @@ func main() {
 	}
 	defer portfolio.Close()
 
-	// The broker -> parser registry. New brokers get a concrete
-	// parsing.Parser implementation and a Register line here (see
-	// internal/parsing.Dispatcher). Until the first real parser exists,
-	// the Stub is registered so the pipeline itself stays exercised
-	// end-to-end in dev; it returns ErrNotImplemented, which the worker
-	// logs and drops the task for.
+	
+	
+	
 	parsers := parsing.NewDispatcher()
-	parsers.Register("tinkoff", parsing.Stub{})
+	parsers.Register(sber.BrokerKey, sber.Parser{})
 
 	w := &worker.Worker{
 		Store:     store,
@@ -131,9 +129,9 @@ func main() {
 	log.Info("parser service stopped")
 }
 
-// runHealthcheckClient dials addr and calls the standard gRPC health
-// check as a plain client, in a separate short-lived process invocation
-// of this same binary - this is what the Dockerfile's HEALTHCHECK runs.
+
+
+
 func runHealthcheckClient(addr string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

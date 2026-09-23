@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"invest/backend/services/parser/internal/objectstore"
 	"invest/backend/services/parser/internal/parsing"
@@ -51,7 +53,7 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
-	trades, err := w.Parser.Parse(t, data)
+	report, err := w.Parser.Parse(t, data)
 	if err != nil {
 		var unsupported *parsing.ErrUnsupportedBroker
 		switch {
@@ -67,18 +69,48 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
-	if len(trades) == 0 {
-		log.Warn("parser returned no trades, dropping task")
-		_ = d.Nack(false, false)
+	if report.Empty() {
+		
+		
+		log.Info("report has no trades or cash operations, nothing to import")
+		_ = d.Ack(false)
 		return
 	}
 
-	if err := w.Portfolio.SubmitTrades(ctx, t.UserID, t.PortfolioID, trades); err != nil {
-		log.Error("submit trades to portfolio, requeueing", "error", err)
+	res, err := w.Portfolio.ImportReport(ctx, t.UserID, t.PortfolioID, report)
+	if err != nil {
+		if isPermanent(err) {
+			
+			
+			
+			log.Error("portfolio rejected report, dropping task", "error", err)
+			_ = d.Nack(false, false)
+			return
+		}
+		log.Error("import report into portfolio, requeueing", "error", err)
 		_ = d.Nack(false, true)
 		return
 	}
 
-	log.Info("task processed", "trades", len(trades))
+	log.Info("task processed",
+		"trades_created", res.TradesCreated, "trades_skipped", res.TradesSkipped,
+		"cash_created", res.CashCreated, "cash_skipped", res.CashSkipped)
 	_ = d.Ack(false)
+}
+
+
+
+
+
+func isPermanent(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch st.Code() {
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.NotFound,
+		codes.AlreadyExists, codes.PermissionDenied, codes.Unauthenticated:
+		return true
+	}
+	return false
 }
