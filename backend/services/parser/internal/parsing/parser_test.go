@@ -7,14 +7,14 @@ import (
 	"invest/backend/services/parser/internal/task"
 )
 
-// staticParser is a fake Parser that returns canned trades/error.
+
 type staticParser struct {
 	trades []Trade
 	err    error
 }
 
-func (p staticParser) Parse(task.ReportUploaded, []byte) ([]Trade, error) {
-	return p.trades, p.err
+func (p staticParser) Parse(task.ReportUploaded, []byte) (Report, error) {
+	return Report{Trades: p.trades}, p.err
 }
 
 func TestDispatcher_ResolvesByBroker(t *testing.T) {
@@ -26,16 +26,16 @@ func TestDispatcher_ResolvesByBroker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(got) != 1 || got[0].SecID != "SBER" {
+	if len(got.Trades) != 1 || got.Trades[0].SecID != "SBER" {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
 
 func TestDispatcher_KeyNormalization(t *testing.T) {
-	// The gateway normalizes user input ("TCS Investments" ->
-	// "tcs-investments") before publishing; the dispatcher must apply
-	// the same normalization on both sides, so a task published with a
-	// differently-cased/spaced-but-equivalent key still resolves.
+	
+	
+	
+	
 	want := []Trade{{SecID: "LKOH", Board: "TQBR", Side: "sell", Quantity: 2, Price: 5000}}
 	d := NewDispatcher()
 	d.Register("TCS Investments", staticParser{trades: want})
@@ -44,7 +44,7 @@ func TestDispatcher_KeyNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(got) != 1 || got[0].SecID != "LKOH" {
+	if len(got.Trades) != 1 || got.Trades[0].SecID != "LKOH" {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
