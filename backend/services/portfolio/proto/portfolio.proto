@@ -1,0 +1,220 @@
+// Contract for the portfolio service: portfolios, trade ledgers, and
+// derived holdings/P&L. Mirrors the previous HTTP API 1:1.
+syntax = "proto3";
+
+package invest.portfolio.v1;
+
+option go_package = "invest/backend/services/portfolio/proto;portfoliopb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Every RPC here requires "x-user-id" metadata (set by gateway after JWT
+// verification) - the service trusts it unconditionally, same model as
+// the old X-User-ID HTTP header (see internal/authmd).
+service PortfolioService {
+  rpc CreatePortfolio(CreatePortfolioRequest) returns (Portfolio);
+  rpc ListPortfolios(google.protobuf.Empty) returns (ListPortfoliosResponse);
+  rpc GetPortfolio(GetPortfolioRequest) returns (Portfolio);
+  rpc CreateTrade(CreateTradeRequest) returns (Trade);
+  // Batch counterpart of CreateTrade: inserts all trades in one DB
+  // transaction - all-or-nothing. Used by the parser service, which
+  // parses a whole broker report at once; the per-trade validation
+  // rules are identical to CreateTrade's. Added 2026-09-23; see
+  // architecture-decisions.md, "parser: асинхронный разбор отчётов".
+  rpc CreateTrades(CreateTradesRequest) returns (CreateTradesResponse);
+  rpc ListTrades(ListTradesRequest) returns (ListTradesResponse);
+  // ImportReport stores everything parsed from one broker report -
+  // trades and cash operations (deposits, dividends, coupons, taxes...)
+  // - in one DB transaction. Idempotent: rows whose external_id is
+  // already stored in this portfolio are skipped, so re-uploading a
+  // report or uploading overlapping periods doesn't duplicate anything.
+  // Used by the parser service.
+  rpc ImportReport(ImportReportRequest) returns (ImportReportResponse);
+  rpc ListCashOperations(ListCashOperationsRequest) returns (ListCashOperationsResponse);
+  rpc GetHoldings(GetHoldingsRequest) returns (GetHoldingsResponse);
+  rpc GetPnL(GetPnLRequest) returns (PnLSummary);
+}
+
+message CreatePortfolioRequest {
+  string name = 1; // empty -> server defaults to "Основной"
+}
+
+message Portfolio {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListPortfoliosResponse {
+  repeated Portfolio portfolios = 1;
+}
+
+message GetPortfolioRequest {
+  string id = 1;
+}
+
+message CreateTradeRequest {
+  string portfolio_id = 1;
+  string secid = 2;
+  string board = 3;
+  string side = 4; // "buy" | "sell"
+  double quantity = 5;
+  double price = 6;
+  double fee = 7;
+  string currency = 8; // empty -> server defaults to "RUB"
+  optional google.protobuf.Timestamp executed_at = 9; // empty -> now
+}
+
+message Trade {
+  string id = 1;
+  string secid = 2;
+  string board = 3;
+  string side = 4;
+  double quantity = 5;
+  double price = 6;
+  double fee = 7;
+  string currency = 8;
+  google.protobuf.Timestamp executed_at = 9;
+  double accrued_interest = 10;
+  string external_id = 11;
+}
+
+message ListTradesRequest {
+  string portfolio_id = 1;
+}
+
+message CreateTradesRequest {
+  string portfolio_id = 1;
+  repeated TradeInput trades = 2; // empty list -> InvalidArgument
+}
+
+// TradeInput is one trade of a batch: the same fields as
+// CreateTradeRequest minus portfolio_id (shared by the whole batch).
+message TradeInput {
+  string secid = 1;
+  string board = 2;
+  string side = 3; // "buy" | "sell"
+  double quantity = 4;
+  double price = 5;
+  double fee = 6;
+  string currency = 7; // empty -> server defaults to "RUB"
+  optional google.protobuf.Timestamp executed_at = 8; // empty -> now
+  // НКД paid (buy) / received (sell) for the whole trade; 0 for shares.
+  double accrued_interest = 9;
+  // Stable id of the trade in the broker's records (e.g. deal number).
+  // Unique per portfolio when set; empty = no deduplication.
+  string external_id = 10;
+}
+
+// Cash operation types: "deposit", "withdrawal", "dividend", "coupon",
+// "redemption", "tax", "fee", "other". amount is signed from the
+// account's point of view: > 0 money came in, < 0 money went out.
+message CashOperationInput {
+  string type = 1;
+  double amount = 2;
+  string currency = 3; // empty -> "RUB"
+  google.protobuf.Timestamp occurred_at = 4;
+  string secid = 5; // set for dividend/coupon/redemption when known
+  string board = 6;
+  string description = 7;
+  string external_id = 8; // unique per portfolio when set
+}
+
+message CashOperation {
+  string id = 1;
+  string type = 2;
+  double amount = 3;
+  string currency = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  string secid = 6;
+  string board = 7;
+  string description = 8;
+  string external_id = 9;
+}
+
+message ImportReportRequest {
+  string portfolio_id = 1;
+  repeated TradeInput trades = 2;
+  repeated CashOperationInput cash_operations = 3;
+}
+
+message ImportReportResponse {
+  int32 trades_created = 1;
+  int32 trades_skipped = 2; // already imported (same external_id)
+  int32 cash_operations_created = 3;
+  int32 cash_operations_skipped = 4;
+}
+
+message ListCashOperationsRequest {
+  string portfolio_id = 1;
+}
+
+message ListCashOperationsResponse {
+  repeated CashOperation cash_operations = 1;
+}
+
+message CreateTradesResponse {
+  repeated Trade trades = 1; // created trades, in request order
+}
+
+message ListTradesResponse {
+  repeated Trade trades = 1;
+}
+
+message GetHoldingsRequest {
+  string portfolio_id = 1;
+}
+
+message Holding {
+  string secid = 1;
+  string board = 2;
+  double quantity = 3;
+  double avg_cost = 4;
+  optional double current_price = 5;
+  optional double market_value = 6;
+  optional double unrealized_pnl = 7;
+}
+
+message GetHoldingsResponse {
+  repeated Holding holdings = 1;
+}
+
+message GetPnLRequest {
+  string portfolio_id = 1;
+}
+
+message InstrumentPnL {
+  Holding holding = 1;
+  double realized_pnl = 2;
+  // realized + unrealized + dividends + coupons + accrued_interest.
+  double total_pnl = 3;
+  double dividends = 4; // received, net of tax withheld at source
+  double coupons = 5;
+  // НКД received on sells minus НКД paid on buys (bonds). Usually
+  // negative until coupons come in - the coupon pays it back.
+  double accrued_interest = 6;
+}
+
+// All money figures assume a single currency (RUB): multi-currency
+// portfolios are not converted.
+message PnLSummary {
+  repeated InstrumentPnL instruments = 1;
+  double total_realized_pnl = 2;
+  double total_unrealized_pnl = 3;
+  // Everything below together: trades (realized + unrealized) + income
+  // (dividends, coupons, НКД) + taxes, fees and other operations not
+  // tied to a trade. Deposits/withdrawals are not profit and excluded.
+  double total_pnl = 4;
+  double total_dividends = 5;
+  double total_coupons = 6;
+  double total_accrued_interest = 7;
+  double total_taxes = 8; // <= 0: taxes charged as separate operations
+  double total_fees = 9;  // <= 0: fees not tied to a trade (trade fees are in realized/unrealized)
+  double total_other = 10; // unrecognised operations from reports, signed
+  double net_deposits = 11; // deposits + withdrawals (withdrawals negative)
+  // Money on the account implied by the ledger: net deposits + every
+  // cash flow of trades and cash operations.
+  double cash_balance = 12;
+}
