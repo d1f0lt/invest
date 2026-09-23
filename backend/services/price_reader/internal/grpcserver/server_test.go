@@ -18,6 +18,13 @@ type fakeStore struct {
 	all         []storage.PriceView
 	byTicker    map[string]storage.PriceView
 	lastQueried []string
+
+	boards  map[string][]string
+	candles map[string][]storage.Candle // by interval
+	weekly  []storage.Candle
+	// what Candles was last asked for
+	gotInterval string
+	gotFrom     time.Time
 }
 
 func (f *fakeStore) AllLatestPrices(_ context.Context) ([]storage.PriceView, error) {
