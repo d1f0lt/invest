@@ -7,13 +7,13 @@ import (
 )
 
 type Config struct {
-	// GRPCAddr is the address parser's own gRPC health server listens on,
-	// e.g. ":8084". Renamed 2026-09-20 from HTTPAddr/HTTP_ADDR: parser has
-	// no API of its own (it only consumes RabbitMQ and calls out to
-	// portfolio), so this is used purely to serve the standard gRPC health
-	// check for Docker/operators - see internal/health and
-	// architecture-decisions.md, "перевод внутреннего взаимодействия
-	// сервисов на gRPC".
+	
+	
+	
+	
+	
+	
+	
 	GRPCAddr string
 
 	RabbitMQURL string
@@ -27,10 +27,10 @@ type Config struct {
 
 	MinIOUseSSL bool
 
-	// PortfolioGRPCAddr is portfolio's gRPC listen address (host:port,
-	// e.g. "portfolio:8083"). Renamed 2026-09-20 from
-	// PortfolioBaseURL/PORTFOLIO_BASE_URL, which held an http:// URL -
-	// gRPC dialing takes a bare address, no scheme.
+	
+	
+	
+	
 	PortfolioGRPCAddr string
 
 	LogLevel string
