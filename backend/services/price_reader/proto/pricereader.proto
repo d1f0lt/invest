@@ -1,0 +1,46 @@
+// Contract for the price_reader service: read-only access to the latest
+// known price per security. Mirrors the previous "GET /api/v1/prices"
+// HTTP endpoint 1:1.
+syntax = "proto3";
+
+package invest.pricereader.v1;
+
+option go_package = "invest/backend/services/price_reader/proto;pricereaderpb";
+
+import "google/protobuf/timestamp.proto";
+
+// GetPrices carries no auth requirement at this level, same as the old
+// HTTP endpoint: price_reader has never checked caller identity itself,
+// only gateway gates access to it (requireAuth) before ever proxying a
+// call through.
+service PriceReaderService {
+  rpc GetPrices(GetPricesRequest) returns (GetPricesResponse);
+}
+
+message GetPricesRequest {
+  // Empty -> latest price for every security price_updater has ever
+  // recorded, same as omitting "?tickers=" on the old HTTP endpoint.
+  repeated string tickers = 1;
+}
+
+message PriceView {
+  string secid = 1;
+  string board = 2;
+  optional string short_name = 3;
+  optional string sec_name = 4;
+  optional string isin = 5;
+  optional string currency = 6;
+  optional double last_price = 7;
+  optional double open_price = 8;
+  optional double high_price = 9;
+  optional double low_price = 10;
+  optional double value_today = 11;
+  optional int64 volume_today = 12;
+  optional string trading_status = 13;
+  optional string moex_update_time = 14;
+  google.protobuf.Timestamp collected_at = 15;
+}
+
+message GetPricesResponse {
+  repeated PriceView prices = 1;
+}
