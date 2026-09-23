@@ -109,8 +109,18 @@ const (
 
 func newUploadRequest(t *testing.T, userID string, fieldname, filename string, content []byte) *http.Request {
 	t.Helper()
+	return newUploadRequestWithBroker(t, userID, fieldname, filename, content, "tinkoff")
+}
+
+func newUploadRequestWithBroker(t *testing.T, userID string, fieldname, filename string, content []byte, broker string) *http.Request {
+	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
+	if broker != "" {
+		if err := mw.WriteField("broker", broker); err != nil {
+			t.Fatalf("write broker field: %v", err)
+		}
+	}
 	fw, err := mw.CreateFormFile(fieldname, filename)
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
@@ -163,6 +173,9 @@ func TestUpload_HappyPath_StoresQueuesAndReturns202(t *testing.T) {
 	pub := queue.published[0]
 	if pub.UserID != "user-1" || pub.PortfolioID != testPortfolio {
 		t.Errorf("published task = %+v, want user-1/%s", pub, testPortfolio)
+	}
+	if pub.Broker != "tinkoff" {
+		t.Errorf("published broker = %q, want %q", pub.Broker, "tinkoff")
 	}
 	if pub.Bucket != testBucket {
 		t.Errorf("published bucket = %q, want %q", pub.Bucket, testBucket)
@@ -316,6 +329,43 @@ func TestUpload_MissingFileField_400(t *testing.T) {
 	}
 	if len(store.uploaded) != 0 || len(queue.published) != 0 {
 		t.Error("store/queue touched on invalid form")
+	}
+}
+
+func TestUpload_MissingBrokerField_400WithoutTouchingStore(t *testing.T) {
+	store := newFakeReportStore()
+	queue := &fakeReportQueue{}
+	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
+
+	// broker="" -> the field is not written to the form at all
+	req := newUploadRequestWithBroker(t, "user-1", "file", "report.pdf", []byte("bytes"), "")
+	rec := httptest.NewRecorder()
+
+	h.Upload(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+	if len(store.uploaded) != 0 || len(queue.published) != 0 {
+		t.Error("store/queue touched on missing broker")
+	}
+}
+
+func TestUpload_BrokerIsNormalized(t *testing.T) {
+	store := newFakeReportStore()
+	queue := &fakeReportQueue{}
+	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
+
+	req := newUploadRequestWithBroker(t, "user-1", "file", "report.pdf", []byte("bytes"), "  Тинькофф  Инвестиции ")
+	rec := httptest.NewRecorder()
+
+	h.Upload(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := queue.published[0].Broker; got != "тинькофф-инвестиции" {
+		t.Errorf("published broker = %q, want %q", got, "тинькофф-инвестиции")
 	}
 }
 
