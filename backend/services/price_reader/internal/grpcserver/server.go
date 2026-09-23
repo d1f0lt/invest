@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,6 +17,11 @@ import (
 type Store interface {
 	AllLatestPrices(ctx context.Context) ([]storage.PriceView, error)
 	LatestPricesByTickers(ctx context.Context, tickers []string) ([]storage.PriceView, error)
+
+	BoardsOf(ctx context.Context, secid string) ([]string, error)
+	LatestCandleStart(ctx context.Context, secid, board, interval string) (time.Time, bool, error)
+	Candles(ctx context.Context, secid, board, interval string, from time.Time) ([]storage.Candle, error)
+	WeeklyCandles(ctx context.Context, secid, board string) ([]storage.Candle, error)
 }
 
 type Server struct {
@@ -23,6 +29,12 @@ type Server struct {
 
 	Store Store
 	Log   *slog.Logger
+
+	// Loc is MOEX's time zone (Europe/Moscow): trading days and candle
+	// boundaries are in it. Nil falls back to a fixed UTC+3.
+	Loc *time.Location
+	// Now is overridable in tests; nil means time.Now.
+	Now func() time.Time
 }
 
 func (s *Server) GetPrices(ctx context.Context, req *pricereaderpb.GetPricesRequest) (*pricereaderpb.GetPricesResponse, error) {

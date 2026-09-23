@@ -1,6 +1,7 @@
 // Contract for the price_reader service: read-only access to the latest
-// known price per security. Mirrors the previous "GET /api/v1/prices"
-// HTTP endpoint 1:1.
+// known price per security (GetPrices - mirrors the previous
+// "GET /api/v1/prices" HTTP endpoint 1:1) and to the candles price_updater
+// keeps for price charts (GetCandles).
 syntax = "proto3";
 
 package invest.pricereader.v1;
@@ -15,6 +16,7 @@ import "google/protobuf/timestamp.proto";
 // call through.
 service PriceReaderService {
   rpc GetPrices(GetPricesRequest) returns (GetPricesResponse);
+  rpc GetCandles(GetCandlesRequest) returns (GetCandlesResponse);
 }
 
 message GetPricesRequest {
@@ -43,4 +45,57 @@ message PriceView {
 
 message GetPricesResponse {
   repeated PriceView prices = 1;
+}
+
+// Chart period. The server picks the candle size for each:
+//   DAY   - hourly candles of the last trading day (today while trading,
+//           otherwise the most recent day with trades)
+//   WEEK  - daily candles of the last 7 days
+//   MONTH - daily candles of the last month
+//   YEAR  - daily candles of the last year
+//   ALL   - weekly candles over the whole stored history
+enum CandleRange {
+  CANDLE_RANGE_UNSPECIFIED = 0;
+  CANDLE_RANGE_DAY = 1;
+  CANDLE_RANGE_WEEK = 2;
+  CANDLE_RANGE_MONTH = 3;
+  CANDLE_RANGE_YEAR = 4;
+  CANDLE_RANGE_ALL = 5;
+}
+
+enum CandleInterval {
+  CANDLE_INTERVAL_UNSPECIFIED = 0;
+  CANDLE_INTERVAL_HOUR = 1;
+  CANDLE_INTERVAL_DAY = 2;
+  CANDLE_INTERVAL_WEEK = 3;
+}
+
+message GetCandlesRequest {
+  string secid = 1;
+  // Optional. Empty -> the only board price_updater knows the security
+  // on; InvalidArgument if it trades on several.
+  string board = 2;
+  CandleRange range = 3;
+}
+
+// Prices are in the same units as GetPrices: money for shares/funds,
+// % of face value for bonds.
+message Candle {
+  google.protobuf.Timestamp start = 1;
+  double open = 2;
+  double high = 3;
+  double low = 4;
+  double close = 5;
+  // Daily/weekly candles only.
+  optional int64 volume = 6;
+  optional double value = 7;
+}
+
+message GetCandlesResponse {
+  string secid = 1;
+  string board = 2;
+  CandleRange range = 3;
+  CandleInterval interval = 4;
+  // Oldest first.
+  repeated Candle candles = 5;
 }

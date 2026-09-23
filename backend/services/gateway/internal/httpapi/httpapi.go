@@ -49,6 +49,7 @@ func NewMux(h *Handlers) http.Handler {
 	mux.HandleFunc("GET /api/v1/users/{id}", h.requireAuth(h.handleGetUser))
 
 	mux.HandleFunc("GET /api/v1/prices", h.requireAuth(h.handleGetPrices))
+	mux.HandleFunc("GET /api/v1/prices/{secid}/candles", h.requireAuth(h.handleGetCandles))
 
 	mux.HandleFunc("POST /api/v1/portfolios", h.requireAuth(h.handleCreatePortfolio))
 	mux.HandleFunc("GET /api/v1/portfolios", h.requireAuth(h.handleListPortfolios))

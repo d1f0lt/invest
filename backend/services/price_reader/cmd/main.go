@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -57,11 +58,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	moscow, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		log.Error("failed to load Europe/Moscow time zone", "error", err)
+		os.Exit(1)
+	}
+
 	grpcServer := grpc.NewServer()
 
 	pricereaderpb.RegisterPriceReaderServiceServer(grpcServer, &grpcserver.Server{
 		Store: store,
 		Log:   log,
+		Loc:   moscow,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, &health.Server{
 		Probe: func(ctx context.Context) error { return store.Ping(ctx) },
