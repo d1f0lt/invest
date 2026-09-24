@@ -4,4 +4,7 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Разрешаем http:// к локальному gateway (localhost / 10.0.2.2) только в
+         debug/profile-сборках; release по-прежнему требует https. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>
