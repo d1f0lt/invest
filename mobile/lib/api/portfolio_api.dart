@@ -1,5 +1,4 @@
 import 'api_client.dart';
-import 'auth_api.dart';
 
 class Portfolio {
   const Portfolio({required this.id, required this.name});
@@ -72,15 +71,9 @@ class PortfolioApi {
 
   final ApiClient _client;
 
-  String get _token {
-    final tokens = Session.tokens;
-    if (tokens == null) throw const ApiException('Требуется вход', statusCode: 401);
-    return tokens.accessToken;
-  }
-
   /// `GET /api/v1/portfolios` → массив портфелей.
   Future<List<Portfolio>> list() async {
-    final json = await _client.get('/api/v1/portfolios', accessToken: _token);
+    final json = await _client.get('/api/v1/portfolios', auth: true);
     return (json as List<dynamic>? ?? const [])
         .map((e) => Portfolio.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -91,7 +84,7 @@ class PortfolioApi {
     final json = await _client.post(
       '/api/v1/portfolios',
       {'name': name.trim()},
-      accessToken: _token,
+      auth: true,
     );
     return Portfolio.fromJson(json! as Map<String, dynamic>);
   }
@@ -101,7 +94,7 @@ class PortfolioApi {
     final json = await _client.patch(
       '/api/v1/portfolios/${Uri.encodeComponent(portfolioId)}',
       {'name': name.trim()},
-      accessToken: _token,
+      auth: true,
     );
     return Portfolio.fromJson(json! as Map<String, dynamic>);
   }
@@ -110,7 +103,7 @@ class PortfolioApi {
   Future<PortfolioStats> stats(String portfolioId) async {
     final json = await _client.get(
       '/api/v1/portfolios/${Uri.encodeComponent(portfolioId)}/pnl',
-      accessToken: _token,
+      auth: true,
     );
     return PortfolioStats.fromPnL(json! as Map<String, dynamic>);
   }

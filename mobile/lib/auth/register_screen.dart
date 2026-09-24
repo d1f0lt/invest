@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
+import '../api/session.dart';
 import '../main_shell.dart';
 
 import 'login_screen.dart';
@@ -67,7 +68,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _password.text,
       );
       // Сразу входим, чтобы не заставлять вводить данные второй раз.
-      Session.tokens = await _api.login(email: _email.text, password: _password.text);
+      await Session.instance.save(
+          await _api.login(email: _email.text, password: _password.text));
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(fadeRoute(const MainShell()), (_) => false);
     } on ApiException catch (e) {

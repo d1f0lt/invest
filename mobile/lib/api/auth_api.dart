@@ -18,6 +18,14 @@ class AuthTokens {
         userId: json['user_id'] as String,
       );
 
+  Map<String, dynamic> toJson() => {
+        'access_token': accessToken,
+        'expires_at': expiresAt.toUtc().toIso8601String(),
+        'refresh_token': refreshToken,
+        'refresh_token_expires_at': refreshTokenExpiresAt.toUtc().toIso8601String(),
+        'user_id': userId,
+      };
+
   final String accessToken;
   final DateTime expiresAt;
   final String refreshToken;
@@ -87,20 +95,12 @@ class AuthApi {
   }
 
   /// `GET /api/v1/me` — текущий пользователь.
-  Future<UserProfile> me(String accessToken) async {
-    final json = await _client.get('/api/v1/me', accessToken: accessToken);
+  Future<UserProfile> me() async {
+    final json = await _client.get('/api/v1/me', auth: true);
     return UserProfile.fromJson(json! as Map<String, dynamic>);
   }
 
   /// `POST /api/v1/logout` — отзывает refresh-токен.
   Future<void> logout(String refreshToken) =>
       _client.post('/api/v1/logout', {'refresh_token': refreshToken});
-}
-
-/// Текущая сессия. Пока хранится только в памяти — после перезапуска
-/// приложения нужно войти заново (TODO: flutter_secure_storage).
-class Session {
-  Session._();
-
-  static AuthTokens? tokens;
 }
