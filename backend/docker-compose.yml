@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      # From the root .env (see .env.example). Applied only when the data
+      # From backend/.env (see backend/.env.example). Applied only when the data
       # volume is initialised for the first time - changing it later does
       # not change the password of an existing database.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a root .env file - see .env.example}
@@ -32,9 +32,9 @@ services:
       # price_updater must run first. Re-running with existing data
       # requires a manual migration run (see each service's README).
       - ./scripts/run-migrations.sh:/docker-entrypoint-initdb.d/00-run-migrations.sh:ro
-      - ./backend/services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
-      - ./backend/services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
-      - ./backend/services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
+      - ./services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
+      - ./services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
+      - ./services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -43,7 +43,7 @@ services:
 
   price_updater:
     build:
-      context: ./backend/services/price_updater
+      context: ./services/price_updater
     restart: unless-stopped
     depends_on:
       postgres:
@@ -57,7 +57,7 @@ services:
       # last loaded date + hourly candles trimmed to each security's last
       # trading day (only the day chart uses them). Also runs at startup;
       # the first start backfills BACKFILL_DAYS of daily candles in the
-      # background. See backend/services/price_updater/README.md.
+      # background. See services/price_updater/README.md.
       HISTORY_RUN_AT: "03:00"
       BACKFILL_DAYS: 365
       HISTORY_REQUEST_PAUSE: 200ms
@@ -80,7 +80,7 @@ services:
   # here.
   price_reader:
     build:
-      context: ./backend/services/price_reader
+      context: ./services/price_reader
     restart: unless-stopped
     depends_on:
       postgres:
@@ -100,7 +100,7 @@ services:
   # price_reader's comment for the full explanation.
   users:
     build:
-      context: ./backend/services/users
+      context: ./services/users
     restart: unless-stopped
     depends_on:
       postgres:
@@ -110,7 +110,7 @@ services:
       GRPC_ADDR: ":8082"
       # Issued on login here, verified by gateway (the only service that
       # checks a JWT signature - see architecture-decisions.md and
-      # backend/services/gateway/README.md). Kept required so `docker
+      # services/gateway/README.md). Kept required so `docker
       # compose up` fails fast instead of running with an empty secret;
       # no longer shared with portfolio/parser, they don't use JWT at
       # all anymore. Must be the SAME value as gateway's JWT_SECRET
@@ -136,7 +136,7 @@ services:
   # conversion applies here.
   portfolio:
     build:
-      context: ./backend/services/portfolio
+      context: ./services/portfolio
     restart: unless-stopped
     depends_on:
       postgres:
@@ -154,8 +154,8 @@ services:
   # Object storage for uploaded broker reports. gateway saves the raw
   # file here (POST /api/v1/portfolios/{id}/reports); parser downloads
   # it by the object key carried in the RabbitMQ task. See
-  # backend/services/gateway/README.md,
-  # backend/services/parser/README.md and architecture-decisions.md
+  # services/gateway/README.md,
+  # services/parser/README.md and architecture-decisions.md
   # ("parser: асинхронный разбор отчётов").
   minio:
     # MinIO no longer publishes community images (Docker Hub minio/minio
@@ -166,7 +166,7 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      # From the root .env (see .env.example).
+      # From backend/.env (see backend/.env.example).
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in a root .env file - see .env.example}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in a root .env file - see .env.example}
     # 127.0.0.1 only - see postgres's comment. gateway/parser reach MinIO
@@ -209,7 +209,7 @@ services:
     image: rabbitmq:3-management-alpine
     restart: unless-stopped
     environment:
-      # From the root .env (see .env.example). Not guest/guest: RabbitMQ
+      # From backend/.env (see backend/.env.example). Not guest/guest: RabbitMQ
       # restricts that user to localhost-only connections, which would
       # break every other container connecting over the "rabbitmq" hostname.
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in a root .env file - see .env.example}
@@ -226,9 +226,9 @@ services:
 
   # Subscribes to RabbitMQ, downloads the report from MinIO, and submits
   # parsed trades to portfolio. Tasks are published by gateway (see
-  # backend/services/gateway/README.md, POST /api/v1/portfolios/{id}/reports).
+  # services/gateway/README.md, POST /api/v1/portfolios/{id}/reports).
   # The actual report parsing is still NOT implemented - see
-  # backend/services/parser/README.md.
+  # services/parser/README.md.
   #
   # No external port for its health-check server either - see
   # price_reader's comment above; RabbitMQ is what feeds it work, not an
@@ -241,9 +241,9 @@ services:
     # parser/Dockerfile), which lives outside this build context - passed
     # in as a named build context.
     build:
-      context: ./backend/services/parser
+      context: ./services/parser
       additional_contexts:
-        portfolio_proto: ./backend/services/portfolio/proto
+        portfolio_proto: ./services/portfolio/proto
     restart: unless-stopped
     depends_on:
       rabbitmq:
@@ -268,7 +268,7 @@ services:
 
   # Single public entry point (see architecture-decisions.md, "убрали
   # JWT-проверку из всех бэкенд-сервисов, закрыли им порты", and
-  # backend/services/gateway/README.md). The only backend service with a
+  # services/gateway/README.md). The only backend service with a
   # published port, and the only one that verifies a JWT signature -
   # everything downstream trusts the "x-user-id" gRPC metadata gateway
   # sets after that check (was the X-User-ID HTTP header before the
@@ -284,11 +284,11 @@ services:
     # gateway/Dockerfile), which live outside this build context - passed
     # in as named build contexts.
     build:
-      context: ./backend/services/gateway
+      context: ./services/gateway
       additional_contexts:
-        users_proto: ./backend/services/users/proto
-        portfolio_proto: ./backend/services/portfolio/proto
-        pricereader_proto: ./backend/services/price_reader/proto
+        users_proto: ./services/users/proto
+        portfolio_proto: ./services/portfolio/proto
+        pricereader_proto: ./services/price_reader/proto
     restart: unless-stopped
     depends_on:
       users:
@@ -304,7 +304,7 @@ services:
     environment:
       HTTP_ADDR: :8080
       # Same value as users' JWT_SECRET - gateway verifies what users
-      # issues. Both come from the root .env file (see .env.example).
+      # issues. Both come from backend/.env file (see backend/.env.example).
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a root .env file - see .env.example}
       USERS_GRPC_ADDR: users:8082
       PORTFOLIO_GRPC_ADDR: portfolio:8083
