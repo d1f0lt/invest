@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +34,7 @@ type Store interface {
 	CreatePortfolio(ctx context.Context, userID, name string) (storage.Portfolio, error)
 	ListPortfoliosByUser(ctx context.Context, userID string) ([]storage.Portfolio, error)
 	GetPortfolio(ctx context.Context, id string) (storage.Portfolio, error)
+	RenamePortfolio(ctx context.Context, id, name string) (storage.Portfolio, error)
 	CreateTrade(ctx context.Context, t storage.Trade) (storage.Trade, error)
 	CreateTradesBatch(ctx context.Context, trades []storage.Trade) ([]storage.Trade, error)
 	ListTrades(ctx context.Context, portfolioID string) ([]storage.Trade, error)
@@ -90,6 +92,33 @@ func (s *Server) GetPortfolio(ctx context.Context, req *portfoliopb.GetPortfolio
 	p, err := s.loadOwnedPortfolio(ctx, req.GetId())
 	if err != nil {
 		return nil, err
+	}
+	return toPortfolioPB(p), nil
+}
+
+// maxPortfolioNameLen limits a portfolio name in characters (runes).
+const maxPortfolioNameLen = 100
+
+func (s *Server) UpdatePortfolio(ctx context.Context, req *portfoliopb.UpdatePortfolioRequest) (*portfoliopb.Portfolio, error) {
+	name := strings.TrimSpace(req.GetName())
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if utf8.RuneCountInString(name) > maxPortfolioNameLen {
+		return nil, status.Errorf(codes.InvalidArgument, "name must be at most %d characters", maxPortfolioNameLen)
+	}
+
+	if _, err := s.loadOwnedPortfolio(ctx, req.GetId()); err != nil {
+		return nil, err
+	}
+
+	p, err := s.Store.RenamePortfolio(ctx, req.GetId(), name)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, status.Error(codes.NotFound, "portfolio not found")
+	}
+	if err != nil {
+		s.Log.Error("rename portfolio", "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return toPortfolioPB(p), nil
 }

@@ -25,15 +25,19 @@ services:
       # subdirectory there is silently skipped ("ignoring ..."), so each
       # service's migrations/ folder is instead mounted one level deeper,
       # under migrations/<NN>_<service>/, and applied by
-      # scripts/run-migrations.sh (the one *.sh file actually placed
-      # directly in /docker-entrypoint-initdb.d, which the image does run).
+      # scripts/run-migrations.sh. That script is mounted OUTSIDE
+      # initdb.d and started by the 00-run-migrations.sql hook: a *.sh
+      # there gets exec'd when it looks executable, which on Docker
+      # Desktop (macOS) it always does and exec then fails - see the
+      # comment in scripts/00-run-migrations.sql.
       # The NN_ prefixes fix the apply order: portfolio's migration has a
       # foreign key into price_updater's securities table, so
       # price_updater must run first. Applied files are tracked in the
       # schema_migrations table; to apply new migrations to an existing
       # database run:
-      #   docker compose exec postgres sh /docker-entrypoint-initdb.d/00-run-migrations.sh
-      - ./scripts/run-migrations.sh:/docker-entrypoint-initdb.d/00-run-migrations.sh:ro
+      #   docker compose exec postgres sh /opt/invest/run-migrations.sh
+      - ./scripts/run-migrations.sh:/opt/invest/run-migrations.sh:ro
+      - ./scripts/00-run-migrations.sql:/docker-entrypoint-initdb.d/00-run-migrations.sql:ro
       - ./services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
       - ./services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
       - ./services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
@@ -153,56 +157,69 @@ services:
       timeout: 5s
       retries: 5
 
-  # Object storage for uploaded broker reports. gateway saves the raw
-  # file here (POST /api/v1/portfolios/{id}/reports); parser downloads
-  # it by the object key carried in the RabbitMQ task. See
-  # services/gateway/README.md,
-  # services/parser/README.md and architecture-decisions.md
-  # ("parser: асинхронный разбор отчётов").
-  minio:
-    # MinIO no longer publishes community images (Docker Hub minio/minio
-    # and minio/mc were removed in 2026); quay.io still serves the last
-    # release. Pinned by tag + digest. This release no longer gets
-    # security fixes - see README ("MinIO") about replacing it.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  # S3-compatible object storage for uploaded broker reports. gateway saves
+  # the raw file here (POST /api/v1/portfolios/{id}/reports); parser
+  # downloads it by the object key carried in the RabbitMQ task. See
+  # services/gateway/README.md, services/parser/README.md and
+  # architecture-decisions.md ("parser: асинхронный разбор отчётов").
+  #
+  # SeaweedFS instead of MinIO since 2026-09-24: MinIO stopped publishing
+  # community images (Docker Hub minio/minio and minio/mc are gone, and
+  # the pinned quay.io references failed to resolve). gateway/parser keep
+  # using the minio-go client - it is a plain S3 client and works against
+  # any S3-compatible server; env names MINIO_* in those services are kept
+  # as-is. Hostname "s3" so nothing in the services is MinIO-specific.
+  #
+  # One container runs master + volume + filer + S3 gateway. The S3
+  # credentials come from backend/.env and are written into the S3 identity
+  # config at startup ($$ = a literal $ for the container's shell).
+  s3:
+    image: chrislusf/seaweedfs:4.06
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      # From backend/.env (see backend/.env.example).
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in a root .env file - see .env.example}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in a root .env file - see .env.example}
-    # 127.0.0.1 only - see postgres's comment. gateway/parser reach MinIO
-    # over the compose network, not through these ports.
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in a root .env file - see .env.example}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Set S3_SECRET_KEY in a root .env file - see .env.example}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        printf '{"identities":[{"name":"invest","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+          "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json
+        exec weed server -dir=/data -ip.bind=0.0.0.0 \
+          -master.port=9333 -volume.port=8080 \
+          -filer -filer.port=8888 \
+          -s3 -s3.port=9000 -s3.config=/tmp/s3.json
+    # 127.0.0.1 only - see postgres's comment. gateway/parser reach the S3
+    # API over the compose network, not through this port.
     ports:
-      - "127.0.0.1:9000:9000" # S3 API
-      - "127.0.0.1:9001:9001" # web console: http://localhost:9001
+      - "127.0.0.1:9000:9000" # S3 API (aws cli / any S3 client with the keys from .env)
     volumes:
-      - minio_data:/data
+      - s3_data:/data
     healthcheck:
-      # curl isn't in the minio image; `mc` is bundled and is the
-      # maintainers' recommended in-container healthcheck.
-      test: ["CMD", "mc", "ready", "local"]
+      # Any HTTP answer from the S3 port (even 403 for an unsigned request)
+      # means the gateway is up.
+      test: ["CMD-SHELL", "wget -S -O /dev/null http://127.0.0.1:9000/ 2>&1 | grep -q 'HTTP/'"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 10s
 
   # One-shot: creates the "reports" bucket parser/gateway expect, so the
-  # stack is usable right after `docker compose up` without a manual
-  # `mc mb` step. Exits after running; safe to re-run (--ignore-existing).
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+  # stack is usable right after `docker compose up` without a manual step.
+  # Uses SeaweedFS's own `weed shell` from the same image; exits after
+  # running, safe to re-run (an existing bucket is left alone).
+  s3-init:
+    image: chrislusf/seaweedfs:4.06
     depends_on:
-      minio:
+      s3:
         condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in a root .env file - see .env.example}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in a root .env file - see .env.example}
-    # $$ = a literal $ for the container's shell (not compose interpolation).
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
-      mc mb --ignore-existing local/reports
-      "
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if echo "s3.bucket.list" | weed shell -master=s3:9333 | grep -qw reports; then
+          echo "bucket reports already exists"
+        else
+          echo "s3.bucket.create -name reports" | weed shell -master=s3:9333
+        fi
 
   # Task queue between gateway and parser. RabbitMQ was chosen over
   # Kafka: this needs simple "one task, one worker" semantics, not a
@@ -226,7 +243,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Subscribes to RabbitMQ, downloads the report from MinIO, and submits
+  # Subscribes to RabbitMQ, downloads the report from S3 (SeaweedFS), and submits
   # parsed trades to portfolio. Tasks are published by gateway (see
   # services/gateway/README.md, POST /api/v1/portfolios/{id}/reports).
   # The actual report parsing is still NOT implemented - see
@@ -250,14 +267,14 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_ENDPOINT: s3:9000
+      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${S3_SECRET_KEY}
       MINIO_USE_SSL: "false"
       PORTFOLIO_GRPC_ADDR: portfolio:8083
       GRPC_ADDR: ":8084"
@@ -301,8 +318,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
     environment:
       HTTP_ADDR: :8080
       # Same value as users' JWT_SECRET - gateway verifies what users
@@ -314,9 +331,9 @@ services:
       UPSTREAM_TIMEOUT: 15s
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_ENDPOINT: s3:9000
+      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${S3_SECRET_KEY}
       MINIO_USE_SSL: "false"
       REPORTS_BUCKET: reports
       MAX_UPLOAD_BYTES: "33554432"
@@ -331,4 +348,4 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
+  s3_data:
