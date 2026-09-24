@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
+import '../api/session.dart';
 import '../main_shell.dart';
 
 import 'register_screen.dart';
@@ -34,7 +35,8 @@ class _LoginScreenState extends State<LoginScreen> {
     FocusScope.of(context).unfocus();
     setState(() => _loading = true);
     try {
-      Session.tokens = await _api.login(email: _email.text, password: _password.text);
+      await Session.instance.save(
+          await _api.login(email: _email.text, password: _password.text));
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(fadeRoute(const MainShell()), (_) => false);
     } on ApiException catch (e) {
