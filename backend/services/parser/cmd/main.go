@@ -65,18 +65,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	consumer, err := queue.Connect(cfg.RabbitMQURL, cfg.RabbitMQQueue)
+	consumer, err := queue.Connect(cfg.RabbitMQURL, cfg.RabbitMQQueue, log)
 	if err != nil {
 		log.Error("failed to connect to rabbitmq", "error", err)
 		os.Exit(1)
 	}
 	defer consumer.Close()
-
-	deliveries, err := consumer.Consume("parser")
-	if err != nil {
-		log.Error("failed to start consuming", "error", err)
-		os.Exit(1)
-	}
 
 	portfolio, err := portfolioclient.New(cfg.PortfolioGRPCAddr)
 	if err != nil {
@@ -97,7 +91,9 @@ func main() {
 		Portfolio: portfolio,
 		Log:       log,
 	}
-	go w.Run(ctx, deliveries)
+	// Consumer.Run reconnects and resubscribes after RabbitMQ restarts;
+	// w.Run returns whenever a session's deliveries channel closes.
+	go consumer.Run(ctx, "parser", w.Run)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {

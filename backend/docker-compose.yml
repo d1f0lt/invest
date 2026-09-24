@@ -29,8 +29,10 @@ services:
       # directly in /docker-entrypoint-initdb.d, which the image does run).
       # The NN_ prefixes fix the apply order: portfolio's migration has a
       # foreign key into price_updater's securities table, so
-      # price_updater must run first. Re-running with existing data
-      # requires a manual migration run (see each service's README).
+      # price_updater must run first. Applied files are tracked in the
+      # schema_migrations table; to apply new migrations to an existing
+      # database run:
+      #   docker compose exec postgres sh /docker-entrypoint-initdb.d/00-run-migrations.sh
       - ./scripts/run-migrations.sh:/docker-entrypoint-initdb.d/00-run-migrations.sh:ro
       - ./services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
       - ./services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
