@@ -25,23 +25,5 @@ require (
 	github.com/tinylib/msgp v1.3.0 // indirect
 	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241202173237-19429a94021a // indirect
-)
-
-// The build environment used to write this scaffold blocks direct HTTP
-// access to golang.org / go.uber.org / gopkg.in / google.golang.org
-// (needed to resolve their vanity import paths), the same restriction
-// documented for golang.org/x/crypto in the users service's go.mod.
-// These replace directives point each module at its official GitHub
-// mirror instead - same module, same content, just fetched from a host
-// that isn't blocked. Harmless (and removable) on a machine without this
-// restriction.
-replace (
-	golang.org/x/crypto => github.com/golang/crypto v0.39.0
-	golang.org/x/net => github.com/golang/net v0.41.0
-	golang.org/x/sys => github.com/golang/sys v0.33.0
-	golang.org/x/text => github.com/golang/text v0.26.0
-	google.golang.org/genproto/googleapis/rpc => github.com/googleapis/go-genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f
-	google.golang.org/grpc => github.com/grpc/grpc-go v1.70.0
-	google.golang.org/protobuf => github.com/protocolbuffers/protobuf-go v1.36.5
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 )

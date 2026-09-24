@@ -1,0 +1,332 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      # From the root .env (see .env.example). Applied only when the data
+      # volume is initialised for the first time - changing it later does
+      # not change the password of an existing database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a root .env file - see .env.example}
+      POSTGRES_DB: invest
+    # Bound to 127.0.0.1 only: reachable from the host itself (psql, an SSH
+    # tunnel from your laptop), never from the internet. Docker publishes
+    # ports past ufw/firewalld, so a bare "5432:5432" on a server would be
+    # open to everyone.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Applied once, in alphabetical order, only on first container start
+      # (empty data dir).
+      #
+      # NOTE: the official postgres image only runs *files* it finds
+      # directly inside /docker-entrypoint-initdb.d - a mounted
+      # subdirectory there is silently skipped ("ignoring ..."), so each
+      # service's migrations/ folder is instead mounted one level deeper,
+      # under migrations/<NN>_<service>/, and applied by
+      # scripts/run-migrations.sh (the one *.sh file actually placed
+      # directly in /docker-entrypoint-initdb.d, which the image does run).
+      # The NN_ prefixes fix the apply order: portfolio's migration has a
+      # foreign key into price_updater's securities table, so
+      # price_updater must run first. Re-running with existing data
+      # requires a manual migration run (see each service's README).
+      - ./scripts/run-migrations.sh:/docker-entrypoint-initdb.d/00-run-migrations.sh:ro
+      - ./backend/services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
+      - ./backend/services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
+      - ./backend/services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  price_updater:
+    build:
+      context: ./backend/services/price_updater
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      MOEX_ISS_BASE_URL: https://iss.moex.com/iss
+      MOEX_BOARDS: TQBR,TQTF,TQOB,TQCB
+      POLL_INTERVAL: 1m
+      # Nightly job (Moscow time): official MOEX daily candles since the
+      # last loaded date + hourly candles trimmed to each security's last
+      # trading day (only the day chart uses them). Also runs at startup;
+      # the first start backfills BACKFILL_DAYS of daily candles in the
+      # background. See backend/services/price_updater/README.md.
+      HISTORY_RUN_AT: "03:00"
+      BACKFILL_DAYS: 365
+      HISTORY_REQUEST_PAUSE: 200ms
+      HTTP_TIMEOUT: 15s
+      LOG_LEVEL: info
+
+  # No external port: reachable only from gateway, inside the compose
+  # network - gateway is the single public entry point. See
+  # architecture-decisions.md ("убрать JWT-проверку из каждого
+  # сервиса, закрыть порты").
+  #
+  # Speaks gRPC only since 2026-09-20 (see architecture-decisions.md,
+  # "перевод внутреннего взаимодействия сервисов на gRPC") - HTTP_ADDR
+  # became GRPC_ADDR, and the healthcheck now runs the service's own
+  # binary with --healthcheck instead of wget (nothing here speaks HTTP
+  # to check with any more). The .proto contract and its generated code
+  # (proto/pricereader.proto + proto/*.pb.go) are this service's own
+  # top-level proto/ package, not a shared module, so the build context
+  # stays this service's own directory, same as every non-gRPC service
+  # here.
+  price_reader:
+    build:
+      context: ./backend/services/price_reader
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      GRPC_ADDR: ":8081"
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "/app/price_reader", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # No external port - see price_reader's comment above. Same gRPC
+  # conversion applies here (GRPC_ADDR, --healthcheck) - see
+  # price_reader's comment for the full explanation.
+  users:
+    build:
+      context: ./backend/services/users
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      GRPC_ADDR: ":8082"
+      # Issued on login here, verified by gateway (the only service that
+      # checks a JWT signature - see architecture-decisions.md and
+      # backend/services/gateway/README.md). Kept required so `docker
+      # compose up` fails fast instead of running with an empty secret;
+      # no longer shared with portfolio/parser, they don't use JWT at
+      # all anymore. Must be the SAME value as gateway's JWT_SECRET
+      # below - both come from this root .env file.
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a root .env file - see .env.example}
+      ACCESS_TOKEN_TTL: 30m
+      REFRESH_TOKEN_TTL: 720h
+      # Background deletion of expired refresh_tokens rows (the service's
+      # internal/cleanup): once an hour, rows are removed 30 days after
+      # they expired - kept that long because rotation reuse-detection
+      # still reads recently-dead tokens. Same defaults as config.Load().
+      REFRESH_TOKEN_CLEANUP_INTERVAL: 1h
+      REFRESH_TOKEN_CLEANUP_RETENTION: 720h
+      BCRYPT_COST: 12
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "/app/users", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # No external port - see price_reader's comment above. Same gRPC
+  # conversion applies here.
+  portfolio:
+    build:
+      context: ./backend/services/portfolio
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      GRPC_ADDR: ":8083"
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "/app/portfolio", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Object storage for uploaded broker reports. gateway saves the raw
+  # file here (POST /api/v1/portfolios/{id}/reports); parser downloads
+  # it by the object key carried in the RabbitMQ task. See
+  # backend/services/gateway/README.md,
+  # backend/services/parser/README.md and architecture-decisions.md
+  # ("parser: асинхронный разбор отчётов").
+  minio:
+    # MinIO no longer publishes community images (Docker Hub minio/minio
+    # and minio/mc were removed in 2026); quay.io still serves the last
+    # release. Pinned by tag + digest. This release no longer gets
+    # security fixes - see README ("MinIO") about replacing it.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # From the root .env (see .env.example).
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in a root .env file - see .env.example}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in a root .env file - see .env.example}
+    # 127.0.0.1 only - see postgres's comment. gateway/parser reach MinIO
+    # over the compose network, not through these ports.
+    ports:
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # web console: http://localhost:9001
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # curl isn't in the minio image; `mc` is bundled and is the
+      # maintainers' recommended in-container healthcheck.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: creates the "reports" bucket parser/gateway expect, so the
+  # stack is usable right after `docker compose up` without a manual
+  # `mc mb` step. Exits after running; safe to re-run (--ignore-existing).
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in a root .env file - see .env.example}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in a root .env file - see .env.example}
+    # $$ = a literal $ for the container's shell (not compose interpolation).
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
+      mc mb --ignore-existing local/reports
+      "
+
+  # Task queue between gateway and parser. RabbitMQ was chosen over
+  # Kafka: this needs simple "one task, one worker" semantics, not a
+  # replayable event log - see architecture-decisions.md.
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      # From the root .env (see .env.example). Not guest/guest: RabbitMQ
+      # restricts that user to localhost-only connections, which would
+      # break every other container connecting over the "rabbitmq" hostname.
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in a root .env file - see .env.example}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in a root .env file - see .env.example}
+    # 127.0.0.1 only - see postgres's comment.
+    ports:
+      - "127.0.0.1:5672:5672"   # AMQP
+      - "127.0.0.1:15672:15672" # management UI: http://localhost:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Subscribes to RabbitMQ, downloads the report from MinIO, and submits
+  # parsed trades to portfolio. Tasks are published by gateway (see
+  # backend/services/gateway/README.md, POST /api/v1/portfolios/{id}/reports).
+  # The actual report parsing is still NOT implemented - see
+  # backend/services/parser/README.md.
+  #
+  # No external port for its health-check server either - see
+  # price_reader's comment above; RabbitMQ is what feeds it work, not an
+  # inbound call. Submits trades to portfolio over gRPC now
+  # (PORTFOLIO_GRPC_ADDR, was PORTFOLIO_BASE_URL) and its own health
+  # server is gRPC too (GRPC_ADDR, was HTTP_ADDR, --healthcheck instead
+  # of wget) - see architecture-decisions.md.
+  parser:
+    # The image generates its gRPC code from portfolio's .proto (see
+    # parser/Dockerfile), which lives outside this build context - passed
+    # in as a named build context.
+    build:
+      context: ./backend/services/parser
+      additional_contexts:
+        portfolio_proto: ./backend/services/portfolio/proto
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      RABBITMQ_QUEUE: report.uploaded
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      PORTFOLIO_GRPC_ADDR: portfolio:8083
+      GRPC_ADDR: ":8084"
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "/app/parser", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Single public entry point (see architecture-decisions.md, "убрали
+  # JWT-проверку из всех бэкенд-сервисов, закрыли им порты", and
+  # backend/services/gateway/README.md). The only backend service with a
+  # published port, and the only one that verifies a JWT signature -
+  # everything downstream trusts the "x-user-id" gRPC metadata gateway
+  # sets after that check (was the X-User-ID HTTP header before the
+  # 2026-09-20 gRPC conversion - see architecture-decisions.md).
+  #
+  # gateway's OWN external API is still plain HTTP/JSON (unchanged for
+  # the mobile client) - only the calls it makes to users/portfolio/
+  # price_reader became gRPC, hence USERS_GRPC_ADDR etc. below (bare
+  # host:port, no http:// scheme) replacing *_BASE_URL, and the
+  # healthcheck staying wget-based.
+  gateway:
+    # The image generates its gRPC code from the owners' .proto files (see
+    # gateway/Dockerfile), which live outside this build context - passed
+    # in as named build contexts.
+    build:
+      context: ./backend/services/gateway
+      additional_contexts:
+        users_proto: ./backend/services/users/proto
+        portfolio_proto: ./backend/services/portfolio/proto
+        pricereader_proto: ./backend/services/price_reader/proto
+    restart: unless-stopped
+    depends_on:
+      users:
+        condition: service_healthy
+      portfolio:
+        condition: service_healthy
+      price_reader:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      HTTP_ADDR: :8080
+      # Same value as users' JWT_SECRET - gateway verifies what users
+      # issues. Both come from the root .env file (see .env.example).
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a root .env file - see .env.example}
+      USERS_GRPC_ADDR: users:8082
+      PORTFOLIO_GRPC_ADDR: portfolio:8083
+      PRICE_READER_GRPC_ADDR: price_reader:8081
+      UPSTREAM_TIMEOUT: 15s
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      RABBITMQ_QUEUE: report.uploaded
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      REPORTS_BUCKET: reports
+      MAX_UPLOAD_BYTES: "33554432"
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  minio_data:
