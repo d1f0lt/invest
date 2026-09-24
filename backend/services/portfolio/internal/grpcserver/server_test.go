@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,17 @@ func (f *fakeStore) GetPortfolio(_ context.Context, id string) (storage.Portfoli
 		return p, nil
 	}
 	return storage.Portfolio{}, storage.ErrNotFound
+}
+
+func (f *fakeStore) RenamePortfolio(_ context.Context, id, name string) (storage.Portfolio, error) {
+	p, ok := f.portfolios[id]
+	if !ok {
+		return storage.Portfolio{}, storage.ErrNotFound
+	}
+	p.Name = name
+	p.UpdatedAt = time.Now()
+	f.portfolios[id] = p
+	return p, nil
 }
 
 func (f *fakeStore) CreateTrade(_ context.Context, t storage.Trade) (storage.Trade, error) {
@@ -214,6 +226,61 @@ func TestGetPortfolio_NonexistentIsNotFound(t *testing.T) {
 	_, err := s.GetPortfolio(withUserID("u1"), &portfoliopb.GetPortfolioRequest{Id: "nope"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+func TestUpdatePortfolio_Renames(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("u1"), &portfoliopb.CreatePortfolioRequest{Name: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: "  ИИС  "})
+	if err != nil {
+		t.Fatalf("UpdatePortfolio: %v", err)
+	}
+	if got.Name != "ИИС" || store.portfolios[p.Id].Name != "ИИС" {
+		t.Errorf("name = %q (stored %q), want trimmed \"ИИС\"", got.Name, store.portfolios[p.Id].Name)
+	}
+}
+
+func TestUpdatePortfolio_Validation(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("u1"), &portfoliopb.CreatePortfolioRequest{Name: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"", "   ", strings.Repeat("я", maxPortfolioNameLen+1)} {
+		_, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: name})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("name len %d: code = %v, want InvalidArgument", len(name), status.Code(err))
+		}
+	}
+	if _, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{
+		Id: p.Id, Name: strings.Repeat("я", maxPortfolioNameLen),
+	}); err != nil {
+		t.Errorf("name of exactly %d runes rejected: %v", maxPortfolioNameLen, err)
+	}
+}
+
+func TestUpdatePortfolio_NotYoursIsNotFound(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("owner"), &portfoliopb.CreatePortfolioRequest{Name: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.UpdatePortfolio(withUserID("someone-else"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: "b"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("code = %v, want NotFound", status.Code(err))
+	}
+	if store.portfolios[p.Id].Name != "a" {
+		t.Errorf("foreign portfolio was renamed to %q", store.portfolios[p.Id].Name)
 	}
 }
 

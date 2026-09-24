@@ -177,6 +177,25 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 	return p, nil
 }
 
+// RenamePortfolio sets a new name and bumps updated_at. Ownership is
+// checked by the caller (grpcserver.loadOwnedPortfolio).
+func (s *Store) RenamePortfolio(ctx context.Context, id, name string) (Portfolio, error) {
+	const stmt = `
+		UPDATE portfolios SET name = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, user_id, name, created_at, updated_at
+	`
+	var p Portfolio
+	err := s.db.QueryRowContext(ctx, stmt, id, name).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
+		return Portfolio{}, ErrNotFound
+	}
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("update portfolio: %w", err)
+	}
+	return p, nil
+}
+
 func (s *Store) CreateTrade(ctx context.Context, t Trade) (Trade, error) {
 	const stmt = `
 		INSERT INTO trades (portfolio_id, secid, board, side, quantity, price, fee, currency, executed_at, accrued_interest, external_id)

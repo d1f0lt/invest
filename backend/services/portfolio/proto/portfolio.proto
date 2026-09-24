@@ -16,6 +16,9 @@ service PortfolioService {
   rpc CreatePortfolio(CreatePortfolioRequest) returns (Portfolio);
   rpc ListPortfolios(google.protobuf.Empty) returns (ListPortfoliosResponse);
   rpc GetPortfolio(GetPortfolioRequest) returns (Portfolio);
+  // Renames a portfolio (the only editable field for now). Added
+  // 2026-09-25 for the mobile app's "Редактирование портфеля" screen.
+  rpc UpdatePortfolio(UpdatePortfolioRequest) returns (Portfolio);
   rpc CreateTrade(CreateTradeRequest) returns (Trade);
   // Batch counterpart of CreateTrade: inserts all trades in one DB
   // transaction - all-or-nothing. Used by the parser service, which
@@ -53,6 +56,11 @@ message ListPortfoliosResponse {
 
 message GetPortfolioRequest {
   string id = 1;
+}
+
+message UpdatePortfolioRequest {
+  string id = 1;
+  string name = 2; // required, trimmed, at most 100 characters
 }
 
 message CreateTradeRequest {
