@@ -1,0 +1,6 @@
+# Сгенерированный код - собирается заново внутри образа (make proto)
+internal/*pb/
+.env
+.env.*
+!.env.example
+bin/

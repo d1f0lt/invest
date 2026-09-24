@@ -1,0 +1,78 @@
+// Contract for the users service: accounts, registration, login, and
+// account lookups. Mirrors the previous HTTP API 1:1 (see
+// backend/services/users/README.md's git history for the JSON shapes
+// this replaces) - only the transport changed, not the semantics.
+
+syntax = "proto3";
+
+package invest.users.v1;
+
+option go_package = "invest/backend/services/users/proto;userspb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service UsersService {
+  // Register creates a new account. Public - no caller identity is
+  // required or expected (there isn't one yet).
+  rpc Register(RegisterRequest) returns (User);
+
+  // Login verifies a password and issues an access token. Public, same
+  // reason as Register.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // GetMe returns the account identified by the "x-user-id" metadata key
+  // the gateway sets after verifying the caller's JWT. Requires that
+  // metadata to be present and non-empty - see the service's auth
+  // interceptor (internal/authmd) for the trust model this carries over
+  // from the old X-User-ID HTTP header unchanged.
+  rpc GetMe(google.protobuf.Empty) returns (User);
+
+  // GetUser looks up any account by id. Requires "x-user-id" metadata
+  // (any non-empty value, not necessarily the target's own id - same
+  // trust model as before).
+  rpc GetUser(GetUserRequest) returns (User);
+
+  rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse);
+
+  rpc Logout(LogoutRequest) returns (google.protobuf.Empty);
+}
+
+message RegisterRequest {
+  string email = 1;
+  optional string username = 2;
+  string password = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  string user_id = 3;
+  string refresh_token = 4;
+  google.protobuf.Timestamp refresh_token_expires_at = 5;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  optional string username = 3;
+  google.protobuf.Timestamp created_at = 4;
+  optional google.protobuf.Timestamp last_login_at = 5;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
