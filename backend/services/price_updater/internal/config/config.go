@@ -41,6 +41,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid POLL_INTERVAL: %w", err)
 	}
+	if pollInterval <= 0 {
+		// time.NewTicker panics on a non-positive interval.
+		return Config{}, fmt.Errorf("POLL_INTERVAL must be positive, got %s", pollInterval)
+	}
 	cfg.PollInterval = pollInterval
 
 	httpTimeout, err := time.ParseDuration(getEnv("HTTP_TIMEOUT", "15s"))

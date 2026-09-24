@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS candles (
     secid       TEXT NOT NULL,
     board       TEXT NOT NULL,
     interval    TEXT NOT NULL CHECK (interval IN ('1h', '1d')),
-    -- Start of the candle. Hourly: start of the hour; daily: 00:00
+    -- Start of the candle. Hourly: start of the hour (Europe/Moscow); daily: 00:00
     -- Europe/Moscow of the trade date.
     start_at    TIMESTAMPTZ NOT NULL,
     open        NUMERIC NOT NULL,
@@ -102,7 +102,10 @@ BEGIN
                (array_agg(last_price ORDER BY collected_at DESC))[1]
         FROM (
             SELECT secid, board, last_price, collected_at,
-                   date_trunc('hour', collected_at) AS hour_start
+                   -- Moscow-local hours, same buckets as updater.buildRows
+                   -- (independent of the session's TimeZone setting).
+                   date_trunc('hour', collected_at AT TIME ZONE 'Europe/Moscow')
+                       AT TIME ZONE 'Europe/Moscow' AS hour_start
             FROM price_snapshots
             WHERE last_price IS NOT NULL
               AND trading_status = 'T'

@@ -46,11 +46,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid ACCESS_TOKEN_TTL: %w", err)
 	}
+	if ttl <= 0 {
+		// A non-positive TTL would issue tokens that are already expired.
+		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL must be positive, got %s", ttl)
+	}
 	cfg.AccessTokenTTL = ttl
 
 	refreshTTL, err := time.ParseDuration(getEnv("REFRESH_TOKEN_TTL", "720h"))
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid REFRESH_TOKEN_TTL: %w", err)
+	}
+	if refreshTTL <= 0 {
+		return Config{}, fmt.Errorf("REFRESH_TOKEN_TTL must be positive, got %s", refreshTTL)
 	}
 	cfg.RefreshTokenTTL = refreshTTL
 
