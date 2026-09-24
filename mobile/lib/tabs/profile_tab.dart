@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
+import '../api/session.dart';
 import '../auth/login_screen.dart';
 import '../auth/widgets.dart';
 import '../portfolio/portfolio_store.dart';
@@ -18,11 +19,7 @@ class _ProfileTabState extends State<ProfileTab> {
   late Future<UserProfile> _profile = _load();
   bool _loggingOut = false;
 
-  Future<UserProfile> _load() async {
-    final tokens = Session.tokens;
-    if (tokens == null) throw const ApiException('Требуется вход', statusCode: 401);
-    return _api.me(tokens.accessToken);
-  }
+  Future<UserProfile> _load() => _api.me();
 
   void _toLogin() {
     Navigator.of(context).pushAndRemoveUntil(fadeRoute(const LoginScreen()), (_) => false);
@@ -30,12 +27,11 @@ class _ProfileTabState extends State<ProfileTab> {
 
   Future<void> _logout() async {
     setState(() => _loggingOut = true);
-    final tokens = Session.tokens;
-    Session.tokens = null;
+    final refreshToken = await Session.instance.clear();
     PortfolioStore.instance.reset();
-    if (tokens != null) {
+    if (refreshToken != null) {
       try {
-        await _api.logout(tokens.refreshToken);
+        await _api.logout(refreshToken);
       } on ApiException {
         // Локально уже вышли; если сервер недоступен, токен просто истечёт сам.
       }

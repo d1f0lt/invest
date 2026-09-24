@@ -4,6 +4,8 @@ import '../api/portfolio_api.dart';
 import '../portfolio/portfolio_picker.dart';
 import '../portfolio/portfolio_store.dart';
 import '../portfolio/stats_format.dart';
+import '../reports/broker_select_screen.dart';
+import '../search/asset_search_screen.dart';
 
 class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
@@ -37,9 +39,11 @@ class _HomeTabState extends State<HomeTab> {
         title: const PortfolioSelector(),
         actions: [
           IconButton(
-            tooltip: 'Поиск бумаг',
+            tooltip: 'Поиск активов',
             icon: const Icon(Icons.search_rounded),
-            onPressed: () => _soon('Поиск бумаг'), // TODO: экран поиска
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const AssetSearchScreen()),
+            ),
           ),
           IconButton(
             tooltip: 'Избранное',
@@ -49,7 +53,7 @@ class _HomeTabState extends State<HomeTab> {
           IconButton(
             tooltip: 'Загрузить отчёт',
             icon: const Icon(Icons.add_rounded),
-            onPressed: () => _soon('Загрузка отчёта'), // TODO: POST /portfolios/{id}/reports
+            onPressed: () => openReportUpload(context),
           ),
           const SizedBox(width: 4),
         ],
@@ -69,7 +73,7 @@ class _HomeTabState extends State<HomeTab> {
                       child: Center(child: CircularProgressIndicator()),
                     );
             } else if (_store.hasStats(current.id) && !_store.statsFor(current.id).hasData) {
-              content = _EmptyPortfolio(onUpload: () => _soon('Загрузка отчёта'));
+              content = _EmptyPortfolio(onUpload: () => openReportUpload(context));
             } else {
               // Сводка не загрузилась — показываем нули, ошибку не выдумываем.
               content = _SummaryCard(stats: _store.statsFor(current.id));
@@ -185,7 +189,7 @@ class _EmptyPortfolio extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: onUpload, // TODO: POST /portfolios/{id}/reports
+            onPressed: onUpload,
             icon: const Icon(Icons.add_rounded),
             label: const Text('Загрузить отчёт'),
           ),

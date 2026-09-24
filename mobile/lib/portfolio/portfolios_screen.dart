@@ -64,7 +64,7 @@ class _PortfoliosScreenState extends State<PortfoliosScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
               controller: _search,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
