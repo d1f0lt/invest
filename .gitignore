@@ -1,16 +1,2 @@
-.vscode
-
-# Go
-*.exe
-*.test
-*.out
-/backend/services/*/bin/
-
-# local env files (never commit secrets/connection strings)
-.env
-*.env.local
-
-# OS
-.DS_Store
-
 .dsh
+.vscode
