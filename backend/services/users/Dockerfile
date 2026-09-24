@@ -1,9 +1,17 @@
-FROM golang:1.24-alpine AS build
-WORKDIR /src
+FROM golang:1.24-alpine3.22 AS build
 
+# *.pb.go не хранятся в git - генерируются здесь из proto/ (make proto).
+RUN apk add --no-cache make protoc protobuf-dev
+ARG PROTOC_GEN_GO_VERSION=v1.36.5
+ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
+ && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+
+WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+RUN make clean proto
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/users ./cmd
 

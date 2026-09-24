@@ -216,9 +216,10 @@ make proto
 make clean
 ```
 
-Удаляет `internal/portfoliopb` целиком — после этого `go build`/`docker
-build` не соберутся, пока не прогнать `make proto` заново (Docker-сборка
-сама `make proto` не вызывает — см. `Dockerfile`). Нужен в основном для
+Удаляет `internal/portfoliopb` целиком — после этого `go build` не соберётся, пока не прогнать `make proto` заново. Docker-образ
+от этого не зависит: сгенерированный код в git не хранится, `Dockerfile` сам
+генерирует его (`make clean proto`) из `portfolio.proto`, который compose
+передаёт именованным build-контекстом `portfolio_proto`. Нужен в основном для
 проверки, что `make proto` восстанавливает код с нуля.
 
 `internal/portfolioclient` — тонкая обёртка над
@@ -270,14 +271,14 @@ docker compose up --build minio rabbitmq portfolio parser
    сервисом `minio-init`, см. корневой `docker-compose.yml`):
    ```bash
    docker compose exec minio-init mc cp /etc/hostname local/reports/test.pdf
-   # или через веб-консоль MinIO: http://localhost:9001 (minio / minio12345)
+   # или через веб-консоль MinIO: http://localhost:9001 (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` из корневого `.env`)
    ```
 2. Создать портфель и получить его id (`users`/`portfolio` уже подняты
    отдельно, см. корневой README и `portfolio`'s README про `grpcurl`) —
    нужны `user_id` и `portfolio_id`.
 3. Опубликовать задачу в очередь `report.uploaded`, например через
-   management UI RabbitMQ (`http://localhost:15672`, `invest` /
-   `invest12345`, вкладка очереди → Publish message) с телом из раздела
+   management UI RabbitMQ (`http://localhost:15672`, `RABBITMQ_USER` /
+   `RABBITMQ_PASSWORD` из корневого `.env`, вкладка очереди → Publish message) с телом из раздела
    "Формат задачи" выше (не забыть поле `broker` — без него задача
    упадёт с "unsupported broker").
 4. `docker compose logs -f parser` — должно быть видно, что задача

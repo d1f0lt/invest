@@ -1,40 +1,33 @@
-# --- build stage ---
-FROM golang:1.24-alpine AS build
-WORKDIR /src
+FROM golang:1.24-alpine3.22 AS build
 
-# Build context is this service's own directory again (docker-compose.yml
-# points context/dockerfile back here) - the generated gRPC/protobuf code
-# (users/portfolio/price_reader's contracts, since gateway is a client of
-# all three) used to live in a sibling module (backend/proto), which
-# forced the context out to the repo root; it's now committed, generated
-# code in internal/{userspb,portfoliopb,pricereaderpb} - NOT a static copy
-# of the .proto itself (that would still be the old duplication problem;
-# see architecture-decisions.md, "перевод внутреннего взаимодействия
-# сервисов на gRPC", раздел про пересмотр 2026-09-22). `make proto` in
-# this directory is what (re)populates those three folders from the
-# canonical .proto in ../{users,portfolio,price_reader}/proto/ - it
-# copies the source .proto in, runs protoc, then deletes the copy, so on
-# disk here it's only ever *.pb.go/*_grpc.pb.go. `COPY . .` below just
-# picks up whatever's already generated and committed; this build never
-# invokes protoc/`make proto`/`make clean` itself, so protoc isn't needed
-# in this image - but that also means internal/{userspb,portfoliopb,
-# pricereaderpb} must NOT be left in the `make clean`-ed (empty) state
-# when building, or this COPY brings in nothing to build against.
+# *.pb.go не хранятся в git - генерируются здесь (make proto) из .proto
+# сервисов-владельцев. Они приходят именованными build-контекстами
+# users_proto / portfolio_proto / pricereader_proto (docker-compose.yml:
+# build.additional_contexts), т.к. лежат вне контекста gateway. Без compose:
+#   docker build --build-context users_proto=../users/proto \
+#     --build-context portfolio_proto=../portfolio/proto \
+#     --build-context pricereader_proto=../price_reader/proto .
+RUN apk add --no-cache make protoc protobuf-dev
+ARG PROTOC_GEN_GO_VERSION=v1.36.5
+ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
+ && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+
+WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=users_proto users.proto /proto/users.proto
+COPY --from=portfolio_proto portfolio.proto /proto/portfolio.proto
+COPY --from=pricereader_proto pricereader.proto /proto/pricereader.proto
+RUN make clean proto \
+    USERS_SRC=/proto/users.proto \
+    PORTFOLIO_SRC=/proto/portfolio.proto \
+    PRICEREADER_SRC=/proto/pricereader.proto
 
-# ./cmd, not ./cmd/gateway: this service's main.go lives directly under
-# cmd/ (see cmd/main.go's doc comment for why).
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/gateway ./cmd
 
-# --- runtime stage ---
 FROM alpine:3.20
-# wget stays here (unlike every other service's Dockerfile): gateway's
-# own external API is still HTTP, and its Docker HEALTHCHECK below still
-# curls its own GET /healthz - only the internal calls it makes to
-# users/portfolio/price_reader became gRPC. See architecture-decisions.md,
-# "перевод внутреннего взаимодействия сервисов на gRPC".
 RUN apk add --no-cache ca-certificates tzdata wget
 WORKDIR /app
 COPY --from=build /out/gateway ./gateway
