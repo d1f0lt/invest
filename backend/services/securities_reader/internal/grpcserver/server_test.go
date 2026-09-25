@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"invest/backend/services/price_reader/internal/storage"
-	pricereaderpb "invest/backend/services/price_reader/proto"
+	"invest/backend/services/securities_reader/internal/storage"
+	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
 type fakeStore struct {
@@ -20,11 +20,15 @@ type fakeStore struct {
 	lastQueried []string
 
 	boards  map[string][]string
-	candles map[string][]storage.Candle // by interval
+	candles map[string][]storage.Candle 
 	weekly  []storage.Candle
-	// what Candles was last asked for
+	
 	gotInterval string
 	gotFrom     time.Time
+
+	found    []storage.PriceView
+	gotQuery string
+	gotLimit int
 }
 
 func (f *fakeStore) AllLatestPrices(_ context.Context) ([]storage.PriceView, error) {
@@ -50,7 +54,7 @@ func TestGetPrices_EmptyTickersReturnsAll(t *testing.T) {
 	store := &fakeStore{all: []storage.PriceView{{SecID: "SBER", Board: "TQBR", CollectedAt: time.Now()}}}
 	s := newTestServer(store)
 
-	resp, err := s.GetPrices(context.Background(), &pricereaderpb.GetPricesRequest{})
+	resp, err := s.GetPrices(context.Background(), &securitiesreaderpb.GetPricesRequest{})
 	if err != nil {
 		t.Fatalf("GetPrices: %v", err)
 	}
@@ -65,7 +69,7 @@ func TestGetPrices_NormalizesTickers(t *testing.T) {
 	}}
 	s := newTestServer(store)
 
-	resp, err := s.GetPrices(context.Background(), &pricereaderpb.GetPricesRequest{Tickers: []string{" sber ", "SBER", "sber"}})
+	resp, err := s.GetPrices(context.Background(), &securitiesreaderpb.GetPricesRequest{Tickers: []string{" sber ", "SBER", "sber"}})
 	if err != nil {
 		t.Fatalf("GetPrices: %v", err)
 	}
@@ -79,7 +83,7 @@ func TestGetPrices_NormalizesTickers(t *testing.T) {
 
 func TestGetPrices_AllBlankTickersIsInvalidArgument(t *testing.T) {
 	s := newTestServer(&fakeStore{})
-	_, err := s.GetPrices(context.Background(), &pricereaderpb.GetPricesRequest{Tickers: []string{"  ", ""}})
+	_, err := s.GetPrices(context.Background(), &securitiesreaderpb.GetPricesRequest{Tickers: []string{"  ", ""}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("code = %v, want InvalidArgument", status.Code(err))
 	}

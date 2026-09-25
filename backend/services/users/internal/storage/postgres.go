@@ -141,9 +141,9 @@ func (s *Store) TouchLastLogin(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateRefreshToken(ctx context.Context, userID, familyID, tokenHash string, expiresAt time.Time) (RefreshToken, error) {
-	// An empty familyID starts a new rotation family (a fresh login); a
-	// non-empty one continues the parent token's family (a rotation) -
-	// see migrations/0003_refresh_token_families.sql.
+	
+	
+	
 	const stmt = `
 		INSERT INTO refresh_tokens (user_id, family_id, token_hash, expires_at)
 		VALUES ($1, COALESCE(NULLIF($2::text, '')::uuid, gen_random_uuid()), $3, $4)
@@ -177,11 +177,11 @@ func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (Re
 	return rt, nil
 }
 
-// ClaimRefreshToken atomically revokes a still-valid token as part of
-// rotation: the WHERE clause and the row lock guarantee that of any number
-// of concurrent refreshes presenting the same token, exactly one reports
-// claimed=true. A false result with a nil error means the token was
-// already revoked/expired by the time the UPDATE ran (lost race or replay).
+
+
+
+
+
 func (s *Store) ClaimRefreshToken(ctx context.Context, id string) (bool, error) {
 	const stmt = `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()`
 	res, err := s.db.ExecContext(ctx, stmt, id)
@@ -195,9 +195,9 @@ func (s *Store) ClaimRefreshToken(ctx context.Context, id string) (bool, error) 
 	return n == 1, nil
 }
 
-// RevokeRefreshTokenFamily revokes every still-valid token of one rotation
-// family - used when a revoked token is replayed (possible theft): the
-// whole session lineage is invalidated, not just the presented token.
+
+
+
 func (s *Store) RevokeRefreshTokenFamily(ctx context.Context, familyID string) error {
 	const stmt = `UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`
 	_, err := s.db.ExecContext(ctx, stmt, familyID)
@@ -216,11 +216,11 @@ func (s *Store) RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) 
 	return nil
 }
 
-// DeleteExpiredRefreshTokens removes tokens whose expires_at is before
-// cutoff and reports how many rows were deleted. Expired/revoked rows are
-// kept until cutoff (rotation-reuse detection needs them as evidence);
-// this is what keeps the table from growing forever - see
-// internal/cleanup.
+
+
+
+
+
 func (s *Store) DeleteExpiredRefreshTokens(ctx context.Context, cutoff time.Time) (int64, error) {
 	const stmt = `DELETE FROM refresh_tokens WHERE expires_at < $1`
 	res, err := s.db.ExecContext(ctx, stmt, cutoff)

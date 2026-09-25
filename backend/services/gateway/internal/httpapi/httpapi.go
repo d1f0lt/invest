@@ -50,6 +50,7 @@ func NewMux(h *Handlers) http.Handler {
 
 	mux.HandleFunc("GET /api/v1/prices", h.requireAuth(h.handleGetPrices))
 	mux.HandleFunc("GET /api/v1/prices/{secid}/candles", h.requireAuth(h.handleGetCandles))
+	mux.HandleFunc("GET /api/v1/securities", h.requireAuth(h.handleSearchSecurities))
 
 	mux.HandleFunc("POST /api/v1/portfolios", h.requireAuth(h.handleCreatePortfolio))
 	mux.HandleFunc("GET /api/v1/portfolios", h.requireAuth(h.handleListPortfolios))
@@ -61,7 +62,12 @@ func NewMux(h *Handlers) http.Handler {
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/pnl", h.requireAuth(h.handleGetPnL))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/cash-operations", h.requireAuth(h.handleListCashOperations))
 
+	mux.HandleFunc("GET /api/v1/brokers", h.requireAuth(h.handleListBrokers))
+	mux.HandleFunc("GET /static/brokers/{file}", handleBrokerIcon)
+
 	mux.HandleFunc("POST /api/v1/portfolios/{id}/reports", h.requireAuth(h.Reports.Upload))
+	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports", h.requireAuth(h.Reports.List))
+	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports/{report_id}", h.requireAuth(h.Reports.Get))
 
 	return mux
 }

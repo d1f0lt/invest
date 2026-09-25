@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"invest/backend/services/price_reader/internal/storage"
-	pricereaderpb "invest/backend/services/price_reader/proto"
+	"invest/backend/services/securities_reader/internal/storage"
+	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
 type Store interface {
@@ -22,22 +22,24 @@ type Store interface {
 	LatestCandleStart(ctx context.Context, secid, board, interval string) (time.Time, bool, error)
 	Candles(ctx context.Context, secid, board, interval string, from time.Time) ([]storage.Candle, error)
 	WeeklyCandles(ctx context.Context, secid, board string) ([]storage.Candle, error)
+
+	SearchSecurities(ctx context.Context, query string, limit int) ([]storage.PriceView, error)
 }
 
 type Server struct {
-	pricereaderpb.UnimplementedPriceReaderServiceServer
+	securitiesreaderpb.UnimplementedSecuritiesReaderServiceServer
 
 	Store Store
 	Log   *slog.Logger
 
-	// Loc is MOEX's time zone (Europe/Moscow): trading days and candle
-	// boundaries are in it. Nil falls back to a fixed UTC+3.
+	
+	
 	Loc *time.Location
-	// Now is overridable in tests; nil means time.Now.
+	
 	Now func() time.Time
 }
 
-func (s *Server) GetPrices(ctx context.Context, req *pricereaderpb.GetPricesRequest) (*pricereaderpb.GetPricesResponse, error) {
+func (s *Server) GetPrices(ctx context.Context, req *securitiesreaderpb.GetPricesRequest) (*securitiesreaderpb.GetPricesResponse, error) {
 	tickers := normalizeTickers(req.GetTickers())
 
 	var (
@@ -58,11 +60,11 @@ func (s *Server) GetPrices(ctx context.Context, req *pricereaderpb.GetPricesRequ
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	out := make([]*pricereaderpb.PriceView, 0, len(prices))
+	out := make([]*securitiesreaderpb.PriceView, 0, len(prices))
 	for _, p := range prices {
 		out = append(out, toPriceViewPB(p))
 	}
-	return &pricereaderpb.GetPricesResponse{Prices: out}, nil
+	return &securitiesreaderpb.GetPricesResponse{Prices: out}, nil
 }
 
 func normalizeTickers(raw []string) []string {
@@ -82,8 +84,8 @@ func normalizeTickers(raw []string) []string {
 	return out
 }
 
-func toPriceViewPB(v storage.PriceView) *pricereaderpb.PriceView {
-	return &pricereaderpb.PriceView{
+func toPriceViewPB(v storage.PriceView) *securitiesreaderpb.PriceView {
+	return &securitiesreaderpb.PriceView{
 		Secid:          v.SecID,
 		Board:          v.Board,
 		ShortName:      v.ShortName,

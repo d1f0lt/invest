@@ -18,11 +18,11 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
-	"invest/backend/services/price_reader/internal/config"
-	"invest/backend/services/price_reader/internal/grpcserver"
-	"invest/backend/services/price_reader/internal/health"
-	"invest/backend/services/price_reader/internal/storage"
-	pricereaderpb "invest/backend/services/price_reader/proto"
+	"invest/backend/services/securities_reader/internal/config"
+	"invest/backend/services/securities_reader/internal/grpcserver"
+	"invest/backend/services/securities_reader/internal/health"
+	"invest/backend/services/securities_reader/internal/storage"
+	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
 func main() {
@@ -66,7 +66,7 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 
-	pricereaderpb.RegisterPriceReaderServiceServer(grpcServer, &grpcserver.Server{
+	securitiesreaderpb.RegisterSecuritiesReaderServiceServer(grpcServer, &grpcserver.Server{
 		Store: store,
 		Log:   log,
 		Loc:   moscow,
@@ -79,16 +79,16 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		log.Info("price_reader shutting down")
+		log.Info("securities_reader shutting down")
 		grpcServer.GracefulStop()
 	}()
 
-	log.Info("price_reader starting", "addr", cfg.GRPCAddr)
+	log.Info("securities_reader starting", "addr", cfg.GRPCAddr)
 	if err := grpcServer.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		log.Error("server error", "error", err)
 		os.Exit(1)
 	}
-	log.Info("price_reader stopped")
+	log.Info("securities_reader stopped")
 }
 
 func runHealthcheckClient(addr string) int {

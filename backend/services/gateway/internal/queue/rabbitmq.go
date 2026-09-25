@@ -13,25 +13,25 @@ import (
 	"invest/backend/services/gateway/internal/task"
 )
 
-// confirmTimeout bounds how long Publish waits for the broker to confirm a
-// message (on top of whatever deadline the caller's context already has).
+
+
 const confirmTimeout = 10 * time.Second
 
-// Publisher publishes report.uploaded tasks.
-//
-// Reliability:
-//   - the channel is in confirm mode and Publish returns only after the
-//     broker has acked the message (durable queue + persistent message +
-//     publisher confirm = the task is stored when the client gets 202);
-//   - the connection is re-established lazily: after a RabbitMQ restart the
-//     next Publish (or health-check Ping) redials, instead of the gateway
-//     staying broken until its container is restarted. This is our own
-//     reconnect rather than amqp091-go's experimental Config.Recovery.
+
+
+
+
+
+
+
+
+
+
 type Publisher struct {
 	url   string
 	queue string
 
-	mu      sync.Mutex // guards the fields below and serializes publishes
+	mu      sync.Mutex 
 	conn    *amqp.Connection
 	channel *amqp.Channel
 	closed  bool
@@ -45,8 +45,8 @@ func Connect(url, queueName string) (*Publisher, error) {
 	return p, nil
 }
 
-// connectLocked (re)establishes the connection and channel. p.mu must be
-// held (or p must not be shared yet).
+
+
 func (p *Publisher) connectLocked() error {
 	p.resetLocked()
 
@@ -75,8 +75,8 @@ func (p *Publisher) connectLocked() error {
 	return nil
 }
 
-// ensureLocked makes sure there is an open channel, redialing if the
-// previous connection or channel has been closed. p.mu must be held.
+
+
 func (p *Publisher) ensureLocked() error {
 	if p.closed {
 		return errors.New("publisher is closed")
@@ -87,7 +87,7 @@ func (p *Publisher) ensureLocked() error {
 	return p.connectLocked()
 }
 
-// resetLocked drops the current connection, if any. p.mu must be held.
+
 func (p *Publisher) resetLocked() {
 	if p.conn != nil {
 		_ = p.conn.Close()
@@ -123,8 +123,8 @@ func (p *Publisher) Publish(ctx context.Context, t task.ReportUploaded) error {
 
 	acked, err := dc.WaitContext(ctx)
 	if err != nil {
-		// No confirm in time: the channel's state is unknown, so start
-		// from a fresh connection next time.
+		
+		
 		p.resetLocked()
 		return fmt.Errorf("wait for publisher confirm: %w", err)
 	}
@@ -134,8 +134,8 @@ func (p *Publisher) Publish(ctx context.Context, t task.ReportUploaded) error {
 	return nil
 }
 
-// Ping reports whether RabbitMQ is reachable, reconnecting if needed so a
-// broker restart heals itself on the next health check.
+
+
 func (p *Publisher) Ping(_ context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

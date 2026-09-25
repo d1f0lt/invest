@@ -182,9 +182,9 @@ func (h *Handlers) handleCreatePortfolio(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, toPortfolioResponse(p))
 }
 
-// handleUpdatePortfolio renames a portfolio: PATCH /api/v1/portfolios/{id}
-// {"name": "..."} -> 200 with the updated portfolio. Validation (non-empty,
-// <= 100 chars) and ownership checks live in the portfolio service.
+
+
+
 func (h *Handlers) handleUpdatePortfolio(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
 	ctx, cancel := h.callCtx(r)

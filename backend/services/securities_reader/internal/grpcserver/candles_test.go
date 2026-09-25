@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"invest/backend/services/price_reader/internal/storage"
-	pricereaderpb "invest/backend/services/price_reader/proto"
+	"invest/backend/services/securities_reader/internal/storage"
+	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
 func (f *fakeStore) BoardsOf(_ context.Context, secid string) ([]string, error) {
@@ -57,14 +57,14 @@ func TestGetCandles_DayUsesLastTradingDayHours(t *testing.T) {
 			storage.IntervalHour: {{Start: at(25, 18), Close: 1}, {Start: at(26, 10), Close: 2}, {Start: at(26, 11), Close: 3}},
 		},
 	}
-	// Sunday: the last hourly candles are from Saturday's session.
+	
 	s := candlesServer(store, at(27, 12))
 
-	resp, err := s.GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: " sber ", Range: pricereaderpb.CandleRange_CANDLE_RANGE_DAY})
+	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: " sber ", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Board != "TQBR" || resp.Secid != "SBER" || resp.Interval != pricereaderpb.CandleInterval_CANDLE_INTERVAL_HOUR {
+	if resp.Board != "TQBR" || resp.Secid != "SBER" || resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR {
 		t.Errorf("resp = %+v", resp)
 	}
 	if len(resp.Candles) != 2 || resp.Candles[0].Close != 2 {
@@ -74,7 +74,7 @@ func TestGetCandles_DayUsesLastTradingDayHours(t *testing.T) {
 
 func TestGetCandles_DayWithoutDataIsEmpty(t *testing.T) {
 	s := candlesServer(&fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}}, at(24, 12))
-	resp, err := s.GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: "SBER", Range: pricereaderpb.CandleRange_CANDLE_RANGE_DAY})
+	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY})
 	if err != nil || len(resp.Candles) != 0 {
 		t.Fatalf("resp=%v err=%v", resp, err)
 	}
@@ -88,11 +88,11 @@ func TestGetCandles_WeekUsesDaily(t *testing.T) {
 			storage.IntervalDay:  {{Start: at(16, 0)}, {Start: at(20, 0)}, {Start: at(23, 0)}},
 		},
 	}
-	resp, err := candlesServer(store, at(24, 12)).GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: "SBER", Range: pricereaderpb.CandleRange_CANDLE_RANGE_WEEK})
+	resp, err := candlesServer(store, at(24, 12)).GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_WEEK})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Interval != pricereaderpb.CandleInterval_CANDLE_INTERVAL_DAY || len(resp.Candles) != 2 {
+	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY || len(resp.Candles) != 2 {
 		t.Errorf("interval=%v candles=%d", resp.Interval, len(resp.Candles))
 	}
 	if !store.gotFrom.Equal(at(17, 0)) {
@@ -105,15 +105,15 @@ func TestGetCandles_MonthYearAll(t *testing.T) {
 	s := candlesServer(store, time.Date(2026, 9, 24, 12, 30, 0, 0, msk))
 
 	cases := []struct {
-		r        pricereaderpb.CandleRange
+		r        securitiesreaderpb.CandleRange
 		from     time.Time
-		interval pricereaderpb.CandleInterval
+		interval securitiesreaderpb.CandleInterval
 	}{
-		{pricereaderpb.CandleRange_CANDLE_RANGE_MONTH, time.Date(2026, 8, 24, 0, 0, 0, 0, msk), pricereaderpb.CandleInterval_CANDLE_INTERVAL_DAY},
-		{pricereaderpb.CandleRange_CANDLE_RANGE_YEAR, time.Date(2025, 9, 24, 0, 0, 0, 0, msk), pricereaderpb.CandleInterval_CANDLE_INTERVAL_DAY},
+		{securitiesreaderpb.CandleRange_CANDLE_RANGE_MONTH, time.Date(2026, 8, 24, 0, 0, 0, 0, msk), securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY},
+		{securitiesreaderpb.CandleRange_CANDLE_RANGE_YEAR, time.Date(2025, 9, 24, 0, 0, 0, 0, msk), securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY},
 	}
 	for _, c := range cases {
-		resp, err := s.GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: "SBER", Range: c.r})
+		resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: c.r})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,8 +122,8 @@ func TestGetCandles_MonthYearAll(t *testing.T) {
 		}
 	}
 
-	resp, err := s.GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: "SBER", Range: pricereaderpb.CandleRange_CANDLE_RANGE_ALL})
-	if err != nil || resp.Interval != pricereaderpb.CandleInterval_CANDLE_INTERVAL_WEEK || len(resp.Candles) != 1 {
+	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_ALL})
+	if err != nil || resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK || len(resp.Candles) != 1 {
 		t.Errorf("ALL: resp=%v err=%v", resp, err)
 	}
 }
@@ -131,19 +131,19 @@ func TestGetCandles_MonthYearAll(t *testing.T) {
 func TestGetCandles_Errors(t *testing.T) {
 	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}, "DUAL": {"TQBR", "TQTF"}}}
 	s := candlesServer(store, at(24, 12))
-	day := pricereaderpb.CandleRange_CANDLE_RANGE_DAY
+	day := securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY
 
 	cases := []struct {
 		name string
-		req  *pricereaderpb.GetCandlesRequest
+		req  *securitiesreaderpb.GetCandlesRequest
 		code codes.Code
 	}{
-		{"no secid", &pricereaderpb.GetCandlesRequest{Range: day}, codes.InvalidArgument},
-		{"no range", &pricereaderpb.GetCandlesRequest{Secid: "SBER"}, codes.InvalidArgument},
-		{"bad range", &pricereaderpb.GetCandlesRequest{Secid: "SBER", Range: 42}, codes.InvalidArgument},
-		{"unknown security", &pricereaderpb.GetCandlesRequest{Secid: "NOPE", Range: day}, codes.NotFound},
-		{"wrong board", &pricereaderpb.GetCandlesRequest{Secid: "SBER", Board: "TQTF", Range: day}, codes.NotFound},
-		{"ambiguous board", &pricereaderpb.GetCandlesRequest{Secid: "DUAL", Range: day}, codes.InvalidArgument},
+		{"no secid", &securitiesreaderpb.GetCandlesRequest{Range: day}, codes.InvalidArgument},
+		{"no range", &securitiesreaderpb.GetCandlesRequest{Secid: "SBER"}, codes.InvalidArgument},
+		{"bad range", &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: 42}, codes.InvalidArgument},
+		{"unknown security", &securitiesreaderpb.GetCandlesRequest{Secid: "NOPE", Range: day}, codes.NotFound},
+		{"wrong board", &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Board: "TQTF", Range: day}, codes.NotFound},
+		{"ambiguous board", &securitiesreaderpb.GetCandlesRequest{Secid: "DUAL", Range: day}, codes.InvalidArgument},
 	}
 	for _, c := range cases {
 		_, err := s.GetCandles(context.Background(), c.req)
@@ -152,7 +152,7 @@ func TestGetCandles_Errors(t *testing.T) {
 		}
 	}
 
-	resp, err := s.GetCandles(context.Background(), &pricereaderpb.GetCandlesRequest{Secid: "DUAL", Board: "tqtf", Range: day})
+	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "DUAL", Board: "tqtf", Range: day})
 	if err != nil || resp.Board != "TQTF" {
 		t.Errorf("explicit board: resp=%v err=%v", resp, err)
 	}

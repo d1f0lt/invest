@@ -27,11 +27,11 @@ func main() {
 	log := newLogger(cfg.LogLevel)
 	slog.SetDefault(log)
 
-	// graceful shutdown on SIGINT/SIGTERM
+	
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// создание клиента для работы с MinIO
+	
 	store, err := objectstore.New(objectstore.Config{
 		Endpoint:  cfg.MinIOEndpoint,
 		AccessKey: cfg.MinIOAccessKey,
@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// подключение к RabbitMQ
+	
 	publisher, err := queue.Connect(cfg.RabbitMQURL, cfg.RabbitMQQueue)
 	if err != nil {
 		log.Error("failed to connect to rabbitmq", "error", err)
@@ -51,11 +51,11 @@ func main() {
 	}
 	defer publisher.Close()
 
-	// gRPC-клиенты к users/portfolio/price_reader
+	
 	clients, err := upstream.Dial(upstream.Addrs{
-		Users:       cfg.UsersGRPCAddr,
-		Portfolio:   cfg.PortfolioGRPCAddr,
-		PriceReader: cfg.PriceReaderGRPCAddr,
+		Users:            cfg.UsersGRPCAddr,
+		Portfolio:        cfg.PortfolioGRPCAddr,
+		SecuritiesReader: cfg.SecuritiesReaderGRPCAddr,
 	})
 	if err != nil {
 		log.Error("failed to dial backend services", "error", err)
@@ -102,7 +102,7 @@ func main() {
 	}()
 
 	log.Info("gateway service starting", "addr", cfg.HTTPAddr,
-		"users", cfg.UsersGRPCAddr, "portfolio", cfg.PortfolioGRPCAddr, "price_reader", cfg.PriceReaderGRPCAddr)
+		"users", cfg.UsersGRPCAddr, "portfolio", cfg.PortfolioGRPCAddr, "securities_reader", cfg.SecuritiesReaderGRPCAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server error", "error", err)
 		os.Exit(1)

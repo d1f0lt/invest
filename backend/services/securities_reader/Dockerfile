@@ -13,16 +13,16 @@ RUN go mod download
 COPY . .
 RUN make clean proto
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/price_reader ./cmd
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/securities_reader ./cmd
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
-COPY --from=build /out/price_reader ./price_reader
+COPY --from=build /out/securities_reader ./securities_reader
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/app/price_reader", "--healthcheck"]
+    CMD ["/app/securities_reader", "--healthcheck"]
 
 USER nobody
 EXPOSE 8081
-ENTRYPOINT ["./price_reader"]
+ENTRYPOINT ["./securities_reader"]

@@ -1,12 +1,3 @@
-
-
-
-
-
-
-
-
-
 package portfolioclient
 
 import (
@@ -28,11 +19,6 @@ type Client struct {
 	api  portfoliopb.PortfolioServiceClient
 }
 
-
-
-
-
-
 func New(addr string) (*Client, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -43,8 +29,6 @@ func New(addr string) (*Client, error) {
 
 func (c *Client) Close() error { return c.conn.Close() }
 
-
-
 type ImportResult struct {
 	TradesCreated, TradesSkipped int
 	CashCreated, CashSkipped     int
@@ -52,16 +36,12 @@ type ImportResult struct {
 
 
 
-
-
-
-
-
-func (c *Client) ImportReport(ctx context.Context, userID, portfolioID string, r parsing.Report) (ImportResult, error) {
+func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID string, r parsing.Report) (ImportResult, error) {
 	ctx = authmd.WithUserID(ctx, userID)
 
 	req := &portfoliopb.ImportReportRequest{
 		PortfolioId:    portfolioID,
+		ReportImportId: importID,
 		Trades:         make([]*portfoliopb.TradeInput, 0, len(r.Trades)),
 		CashOperations: make([]*portfoliopb.CashOperationInput, 0, len(r.CashOperations)),
 	}
@@ -110,9 +90,22 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID string, r
 	}, nil
 }
 
-
-
-
 func submitTimeout(rows int) time.Duration {
 	return 30*time.Second + time.Duration(rows)*200*time.Millisecond
+}
+
+
+
+func (c *Client) SetImportStatus(ctx context.Context, userID, importID, status, message string) error {
+	ctx, cancel := context.WithTimeout(authmd.WithUserID(ctx, userID), 10*time.Second)
+	defer cancel()
+	_, err := c.api.UpdateReportImportStatus(ctx, &portfoliopb.UpdateReportImportStatusRequest{
+		Id:     importID,
+		Status: status,
+		Error:  message,
+	})
+	if err != nil {
+		return fmt.Errorf("set report import %s status %s: %w", importID, status, err)
+	}
+	return nil
 }
