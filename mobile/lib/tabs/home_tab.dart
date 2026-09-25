@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api/portfolio_api.dart';
+import '../favorites/favorites_screen.dart';
 import '../portfolio/portfolio_picker.dart';
 import '../portfolio/portfolio_store.dart';
 import '../portfolio/stats_format.dart';
@@ -23,12 +24,6 @@ class _HomeTabState extends State<HomeTab> {
     if (!_store.loaded) _store.load();
   }
 
-  void _soon(String what) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$what — скоро')));
-  }
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -48,7 +43,9 @@ class _HomeTabState extends State<HomeTab> {
           IconButton(
             tooltip: 'Избранное',
             icon: const Icon(Icons.star_outline_rounded),
-            onPressed: () => _soon('Избранное'), // TODO: список избранных бумаг
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const FavoritesScreen()),
+            ),
           ),
           IconButton(
             tooltip: 'Загрузить отчёт',

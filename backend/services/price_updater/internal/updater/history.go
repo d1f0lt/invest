@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"invest/backend/services/price_updater/internal/moexclient"
 	"invest/backend/services/price_updater/internal/storage"
 )
 
@@ -39,11 +40,23 @@ func NewHistoryJob(client MoexClient, store Storage, boards []string, loc *time.
 	return &HistoryJob{client: client, store: store, boards: boards, loc: loc, cfg: cfg, log: log, now: time.Now}
 }
 
+const (
+	historyAttempts   = 3
+	historyRetryAfter = 15 * time.Minute
+)
+
+var historyBackoff = []time.Duration{2 * time.Second, 10 * time.Second}
+
 func (j *HistoryJob) Run(ctx context.Context) {
 	for {
-		j.RunOnce(ctx)
+		complete := j.runOnce(ctx)
 
 		next := nextDailyRun(j.now(), j.loc, j.cfg.RunAtHour, j.cfg.RunAtMinute)
+		if !complete {
+			if retry := j.now().Add(historyRetryAfter); retry.Before(next) {
+				next = retry
+			}
+		}
 		j.log.Info("history job scheduled", "next_run", next.Format(time.RFC3339))
 		timer := time.NewTimer(time.Until(next))
 		select {
@@ -57,15 +70,21 @@ func (j *HistoryJob) Run(ctx context.Context) {
 }
 
 func (j *HistoryJob) RunOnce(ctx context.Context) {
+	j.runOnce(ctx)
+}
+
+func (j *HistoryJob) runOnce(ctx context.Context) bool {
 	start := j.now()
 	today := dateOf(start, j.loc)
+	complete := true
 
 	for _, board := range j.boards {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		if err := j.syncBoard(ctx, board, today); err != nil {
-			j.log.Error("history sync failed", "board", board, "error", err)
+			complete = false
+			j.log.Error("history sync failed, will retry", "board", board, "error", err, "retry_in", historyRetryAfter.String())
 		}
 	}
 
@@ -76,7 +95,29 @@ func (j *HistoryJob) RunOnce(ctx context.Context) {
 		j.log.Info("hourly candles cleaned up", "deleted", n)
 	}
 
-	j.log.Info("history job complete", "duration_ms", time.Since(start).Milliseconds())
+	j.log.Info("history job complete", "complete", complete, "duration_ms", time.Since(start).Milliseconds())
+	return complete
+}
+
+func (j *HistoryJob) fetchWithRetry(ctx context.Context, board string, d time.Time) ([]moexclient.DailyCandle, error) {
+	var lastErr error
+	for attempt := 0; attempt < historyAttempts; attempt++ {
+		if attempt > 0 {
+			wait := historyBackoff[min(attempt-1, len(historyBackoff)-1)]
+			j.log.Warn("history request failed, retrying", "board", board, "date", d.Format("2006-01-02"), "attempt", attempt, "error", lastErr)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+		daily, err := j.client.FetchBoardHistory(ctx, board, d)
+		if err == nil {
+			return daily, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 func (j *HistoryJob) syncBoard(ctx context.Context, board string, today time.Time) error {
@@ -100,7 +141,7 @@ func (j *HistoryJob) syncBoard(ctx context.Context, board string, today time.Tim
 			}
 		}
 
-		daily, err := j.client.FetchBoardHistory(ctx, board, d)
+		daily, err := j.fetchWithRetry(ctx, board, d)
 		if err != nil {
 			return err
 		}

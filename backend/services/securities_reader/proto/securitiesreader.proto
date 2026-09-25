@@ -21,6 +21,14 @@ service SecuritiesReaderService {
   // Search by ticker (SECID), short/full name or ISIN for the asset search
   // screen. Case-insensitive, "ё" == "е".
   rpc SearchSecurities(SearchSecuritiesRequest) returns (SearchSecuritiesResponse);
+  // Reference data for the "about" section of the asset card: issuer,
+  // full name, ISIN, lot, face value, issue size, listing level, and for
+  // bonds maturity and coupon. Fetched from MOEX ISS and cached.
+  rpc GetSecurityInfo(GetSecurityInfoRequest) returns (GetSecurityInfoResponse);
+  // Dividend history by registry close date, newest first, including
+  // announced dividends and forecasts. Source: dohod.ru (MOEX ISS no longer
+  // serves /securities/{secid}/dividends), cached for a day. Bonds -> empty.
+  rpc GetDividends(GetDividendsRequest) returns (GetDividendsResponse);
 }
 
 message GetPricesRequest {
@@ -45,6 +53,9 @@ message PriceView {
   optional string trading_status = 13;
   optional string moex_update_time = 14;
   google.protobuf.Timestamp collected_at = 15;
+  // Official close of the previous trading day as reported by MOEX
+  // (PREVLEGALCLOSEPRICE, else PREVPRICE), stored by price_updater.
+  optional double prev_close = 16;
 }
 
 message GetPricesResponse {
@@ -52,11 +63,15 @@ message GetPricesResponse {
 }
 
 // Chart period. The server picks the candle size for each:
-//   DAY   - hourly candles of the last trading day (today while trading,
-//           otherwise the most recent day with trades)
+//   DAY   - 10-minute candles of the last trading day (today while
+//           trading, otherwise the most recent day with trades), fetched
+//           from MOEX ISS on demand; hourly candles from the database if
+//           MOEX is unavailable
 //   WEEK  - daily candles of the last 7 days
 //   MONTH - daily candles of the last month
 //   YEAR  - daily candles of the last year
+//           (WEEK/MONTH/YEAR come from MOEX ISS on demand, cached for 5
+//           minutes; stored daily candles if MOEX is unavailable)
 //   ALL   - weekly candles over the whole stored history
 enum CandleRange {
   CANDLE_RANGE_UNSPECIFIED = 0;
@@ -65,6 +80,9 @@ enum CandleRange {
   CANDLE_RANGE_MONTH = 3;
   CANDLE_RANGE_YEAR = 4;
   CANDLE_RANGE_ALL = 5;
+  // Weekly candles of the last 5 years from MOEX ISS (cached for an hour);
+  // stored weekly history (as ALL) if MOEX is unavailable.
+  CANDLE_RANGE_FIVE_YEARS = 6;
 }
 
 enum CandleInterval {
@@ -72,6 +90,7 @@ enum CandleInterval {
   CANDLE_INTERVAL_HOUR = 1;
   CANDLE_INTERVAL_DAY = 2;
   CANDLE_INTERVAL_WEEK = 3;
+  CANDLE_INTERVAL_TEN_MINUTES = 4;
 }
 
 message GetCandlesRequest {
@@ -116,4 +135,56 @@ message SearchSecuritiesRequest {
 // (TQBR), funds (TQTF), OFZ (TQOB), corporate bonds (TQCB), then by ticker.
 message SearchSecuritiesResponse {
   repeated PriceView securities = 1;
+}
+
+message GetSecurityInfoRequest {
+  string secid = 1;
+  // Optional, same rules as GetCandlesRequest.board.
+  string board = 2;
+}
+
+// One row of the "about" section, already in display order.
+message SecurityInfoField {
+  // Stable key: ISSUER, NAME, TYPE, ISIN, REGNUMBER, LOTSIZE, FACEVALUE,
+  // ISSUESIZE, ISSUEDATE, LISTLEVEL, MATDATE, OFFERDATE, COUPONPERCENT,
+  // COUPONVALUE, COUPONFREQUENCY, QUALIFIED.
+  string name = 1;
+  // Russian label.
+  string title = 2;
+  // Raw value: numbers with "." as decimal separator, dates as YYYY-MM-DD,
+  // booleans as "1"/"0".
+  string value = 3;
+  // text | number | money | percent | date | bool
+  string type = 4;
+  // Currency code for money (SUR, USD, ...) or a unit such as "шт.".
+  optional string unit = 5;
+}
+
+message GetSecurityInfoResponse {
+  string secid = 1;
+  string board = 2;
+  repeated SecurityInfoField fields = 3;
+}
+
+message GetDividendsRequest {
+  string secid = 1;
+}
+
+message Dividend {
+  // Registry close date, YYYY-MM-DD (Moscow).
+  string registry_close_date = 1;
+  // Per share, in currency.
+  double value = 2;
+  // RUB, USD, ...
+  string currency = 3;
+  // Analysts' forecast, not an announced dividend.
+  bool forecast = 4;
+  // Board recommendation / announcement date, YYYY-MM-DD; empty if unknown.
+  string declared_date = 5;
+}
+
+message GetDividendsResponse {
+  string secid = 1;
+  // Newest first.
+  repeated Dividend dividends = 2;
 }

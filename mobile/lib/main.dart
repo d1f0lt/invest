@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api/session.dart';
 import 'auth/login_screen.dart';
 import 'auth/widgets.dart';
+import 'favorites/favorites_store.dart';
 import 'main_shell.dart';
 import 'portfolio/portfolio_store.dart';
 
@@ -12,6 +13,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Восстанавливаем сохранённую сессию, чтобы не просить пароль при каждом запуске.
   await Session.instance.restore();
+  // Избранное хранится на устройстве — подтягиваем его сразу при запуске.
+  await FavoritesStore.instance.load();
   Session.instance.onExpired = () {
     PortfolioStore.instance.reset();
     _navigatorKey.currentState

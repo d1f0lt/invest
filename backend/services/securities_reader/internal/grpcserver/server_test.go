@@ -27,6 +27,8 @@ type fakeStore struct {
 	gotFrom     time.Time
 
 	found    []storage.PriceView
+
+	refs map[string]storage.SecurityRef
 	gotQuery string
 	gotLimit int
 }

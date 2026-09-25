@@ -14,12 +14,15 @@ var candleRanges = map[string]securitiesreaderpb.CandleRange{
 	"month": securitiesreaderpb.CandleRange_CANDLE_RANGE_MONTH,
 	"year":  securitiesreaderpb.CandleRange_CANDLE_RANGE_YEAR,
 	"all":   securitiesreaderpb.CandleRange_CANDLE_RANGE_ALL,
+	"5y":    securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS,
 }
 
 var candleIntervalNames = map[securitiesreaderpb.CandleInterval]string{
 	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR: "hour",
 	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY:  "day",
 	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK: "week",
+
+	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES: "10min",
 }
 
 type candleView struct {
@@ -48,7 +51,7 @@ func (h *Handlers) handleGetCandles(w http.ResponseWriter, r *http.Request) {
 	}
 	rng, ok := candleRanges[rangeName]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "range must be one of: day, week, month, year, all")
+		writeError(w, http.StatusBadRequest, "range must be one of: day, week, month, year, 5y, all")
 		return
 	}
 

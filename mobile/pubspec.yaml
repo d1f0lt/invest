@@ -13,6 +13,8 @@ dependencies:
   file_picker: ^13.1.0
   # Хранение токенов между запусками (Keychain / Android Keystore).
   flutter_secure_storage: ^11.2.0
+  # Избранные бумаги — хранятся локально на устройстве.
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

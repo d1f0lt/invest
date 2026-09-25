@@ -113,3 +113,26 @@ func scanCandles(rows *sql.Rows) ([]Candle, error) {
 	}
 	return out, nil
 }
+
+type SecurityRef struct {
+	ShortName *string
+	SecName   *string
+	ISIN      *string
+	Currency  *string
+	LotSize   *int64
+}
+
+func (s *Store) SecurityRef(ctx context.Context, secid, board string) (SecurityRef, bool, error) {
+	var r SecurityRef
+	err := s.db.QueryRowContext(ctx, `
+		SELECT short_name, sec_name, isin, currency, lot_size
+		FROM securities WHERE secid = $1 AND board = $2
+	`, secid, board).Scan(&r.ShortName, &r.SecName, &r.ISIN, &r.Currency, &r.LotSize)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SecurityRef{}, false, nil
+	}
+	if err != nil {
+		return SecurityRef{}, false, fmt.Errorf("query security: %w", err)
+	}
+	return r, true, nil
+}

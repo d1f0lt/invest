@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -86,6 +87,7 @@ func TestNextDailyRun(t *testing.T) {
 type fakeClient struct {
 	history map[string][]moexclient.DailyCandle 
 	asked   []string
+	failN   map[string]int
 }
 
 func (f *fakeClient) FetchBoard(context.Context, string) (moexclient.BoardSnapshot, error) {
@@ -95,6 +97,10 @@ func (f *fakeClient) FetchBoard(context.Context, string) (moexclient.BoardSnapsh
 func (f *fakeClient) FetchBoardHistory(_ context.Context, _ string, d time.Time) ([]moexclient.DailyCandle, error) {
 	key := d.Format("2006-01-02")
 	f.asked = append(f.asked, key)
+	if f.failN[key] > 0 {
+		f.failN[key]--
+		return nil, errors.New("temporary")
+	}
 	return f.history[key], nil
 }
 
@@ -185,5 +191,39 @@ func TestHistoryJobBackfillsNewBoard(t *testing.T) {
 
 	if len(c.asked) != 3 || c.asked[0] != "2026-09-21" {
 		t.Errorf("asked = %v, want 3 days starting 2026-09-21", c.asked)
+	}
+}
+
+func TestHistoryJobRetriesFailedDate(t *testing.T) {
+	saved := historyBackoff
+	historyBackoff = []time.Duration{time.Millisecond}
+	defer func() { historyBackoff = saved }()
+
+	c := &fakeClient{
+		history: map[string][]moexclient.DailyCandle{
+			"2026-09-23": {{SecID: "SBER", BoardID: "TQBR", TradeDate: day("2026-09-23"), Open: 1, High: 1, Low: 1, Close: 1}},
+		},
+		failN: map[string]int{"2026-09-23": 2},
+	}
+	s := &fakeStore{synced: map[string]time.Time{"TQBR": day("2026-09-22")}}
+	complete := newJob(c, s, time.Date(2026, 9, 24, 3, 0, 0, 0, msk), 365).runOnce(context.Background())
+
+	if !complete || !s.synced["TQBR"].Equal(day("2026-09-23")) || len(s.candles) != 1 {
+		t.Errorf("complete=%v synced=%v candles=%d", complete, s.synced["TQBR"], len(s.candles))
+	}
+}
+
+func TestHistoryJobReportsIncompleteAfterRetries(t *testing.T) {
+	saved := historyBackoff
+	historyBackoff = []time.Duration{time.Millisecond}
+	defer func() { historyBackoff = saved }()
+
+	c := &fakeClient{history: map[string][]moexclient.DailyCandle{}, failN: map[string]int{"2026-09-23": 10}}
+	s := &fakeStore{synced: map[string]time.Time{"TQBR": day("2026-09-22")}}
+	if newJob(c, s, time.Date(2026, 9, 24, 3, 0, 0, 0, msk), 365).runOnce(context.Background()) {
+		t.Error("want incomplete run")
+	}
+	if len(c.asked) != historyAttempts {
+		t.Errorf("attempts = %d, want %d", len(c.asked), historyAttempts)
 	}
 }

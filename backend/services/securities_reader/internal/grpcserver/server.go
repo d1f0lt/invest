@@ -4,12 +4,15 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"invest/backend/services/securities_reader/internal/dohod"
+	"invest/backend/services/securities_reader/internal/moex"
 	"invest/backend/services/securities_reader/internal/storage"
 	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
@@ -24,6 +27,19 @@ type Store interface {
 	WeeklyCandles(ctx context.Context, secid, board string) ([]storage.Candle, error)
 
 	SearchSecurities(ctx context.Context, query string, limit int) ([]storage.PriceView, error)
+
+	SecurityRef(ctx context.Context, secid, board string) (storage.SecurityRef, bool, error)
+}
+
+type DividendSource interface {
+	Dividends(ctx context.Context, secid string) ([]dohod.Dividend, error)
+}
+
+type MoexClient interface {
+	IntradayCandles(ctx context.Context, secid, board string, day time.Time, loc *time.Location) ([]moex.Candle, error)
+	Candles(ctx context.Context, secid, board string, interval int, from, till time.Time, loc *time.Location) ([]moex.Candle, error)
+	Description(ctx context.Context, secid string) ([]moex.DescriptionField, error)
+	EmitterTitle(ctx context.Context, secid string) (string, error)
 }
 
 type Server struct {
@@ -37,6 +53,27 @@ type Server struct {
 	Loc *time.Location
 	
 	Now func() time.Time
+
+	Moex MoexClient
+
+	DividendSource DividendSource
+
+	cachesOnce sync.Once
+	intraday   *ttlCache[[]storage.Candle]
+	longRange  *ttlCache[[]storage.Candle]
+	daily      *ttlCache[[]storage.Candle]
+	info       *ttlCache[*securitiesreaderpb.GetSecurityInfoResponse]
+	dividends  *ttlCache[[]*securitiesreaderpb.Dividend]
+}
+
+func (s *Server) caches() {
+	s.cachesOnce.Do(func() {
+		s.intraday = newTTLCache[[]storage.Candle](time.Minute, 2000)
+		s.longRange = newTTLCache[[]storage.Candle](time.Hour, 2000)
+		s.daily = newTTLCache[[]storage.Candle](5*time.Minute, 5000)
+		s.info = newTTLCache[*securitiesreaderpb.GetSecurityInfoResponse](12*time.Hour, 5000)
+		s.dividends = newTTLCache[[]*securitiesreaderpb.Dividend](24*time.Hour, 5000)
+	})
 }
 
 func (s *Server) GetPrices(ctx context.Context, req *securitiesreaderpb.GetPricesRequest) (*securitiesreaderpb.GetPricesResponse, error) {
@@ -101,5 +138,6 @@ func toPriceViewPB(v storage.PriceView) *securitiesreaderpb.PriceView {
 		TradingStatus:  v.TradingStatus,
 		MoexUpdateTime: v.MoexUpdateTime,
 		CollectedAt:    timestamppb.New(v.CollectedAt),
+		PrevClose:      v.PrevClose,
 	}
 }
