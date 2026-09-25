@@ -12,9 +12,9 @@ type Config struct {
 
 	JWTSecret []byte
 
-	UsersGRPCAddr       string
-	PortfolioGRPCAddr   string
-	PriceReaderGRPCAddr string
+	UsersGRPCAddr            string
+	PortfolioGRPCAddr        string
+	SecuritiesReaderGRPCAddr string
 
 	UpstreamTimeout time.Duration
 
@@ -35,17 +35,17 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
-		UsersGRPCAddr:       getEnv("USERS_GRPC_ADDR", "localhost:8082"),
-		PortfolioGRPCAddr:   getEnv("PORTFOLIO_GRPC_ADDR", "localhost:8083"),
-		PriceReaderGRPCAddr: getEnv("PRICE_READER_GRPC_ADDR", "localhost:8081"),
-		RabbitMQURL:         getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-		RabbitMQQueue:       getEnv("RABBITMQ_QUEUE", "report.uploaded"),
-		MinIOEndpoint:       getEnv("MINIO_ENDPOINT", "localhost:9000"),
-		MinIOAccessKey:      getEnv("MINIO_ACCESS_KEY", ""),
-		MinIOSecretKey:      getEnv("MINIO_SECRET_KEY", ""),
-		ReportsBucket:       getEnv("REPORTS_BUCKET", "reports"),
-		LogLevel:            getEnv("LOG_LEVEL", "info"),
+		HTTPAddr:                 getEnv("HTTP_ADDR", ":8080"),
+		UsersGRPCAddr:            getEnv("USERS_GRPC_ADDR", "localhost:8082"),
+		PortfolioGRPCAddr:        getEnv("PORTFOLIO_GRPC_ADDR", "localhost:8083"),
+		SecuritiesReaderGRPCAddr: getEnv("SECURITIES_READER_GRPC_ADDR", "localhost:8081"),
+		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "report.uploaded"),
+		MinIOEndpoint:            getEnv("MINIO_ENDPOINT", "localhost:9000"),
+		MinIOAccessKey:           getEnv("MINIO_ACCESS_KEY", ""),
+		MinIOSecretKey:           getEnv("MINIO_SECRET_KEY", ""),
+		ReportsBucket:            getEnv("REPORTS_BUCKET", "reports"),
+		LogLevel:                 getEnv("LOG_LEVEL", "info"),
 	}
 
 	secret := os.Getenv("JWT_SECRET")

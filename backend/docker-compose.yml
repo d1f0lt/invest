@@ -80,13 +80,13 @@ services:
   # became GRPC_ADDR, and the healthcheck now runs the service's own
   # binary with --healthcheck instead of wget (nothing here speaks HTTP
   # to check with any more). The .proto contract and its generated code
-  # (proto/pricereader.proto + proto/*.pb.go) are this service's own
+  # (proto/securitiesreader.proto + proto/*.pb.go) are this service's own
   # top-level proto/ package, not a shared module, so the build context
   # stays this service's own directory, same as every non-gRPC service
   # here.
-  price_reader:
+  securities_reader:
     build:
-      context: ./services/price_reader
+      context: ./services/securities_reader
     restart: unless-stopped
     depends_on:
       postgres:
@@ -96,14 +96,14 @@ services:
       GRPC_ADDR: ":8081"
       LOG_LEVEL: info
     healthcheck:
-      test: ["CMD", "/app/price_reader", "--healthcheck"]
+      test: ["CMD", "/app/securities_reader", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # No external port - see price_reader's comment above. Same gRPC
+  # No external port - see securities_reader's comment above. Same gRPC
   # conversion applies here (GRPC_ADDR, --healthcheck) - see
-  # price_reader's comment for the full explanation.
+  # securities_reader's comment for the full explanation.
   users:
     build:
       context: ./services/users
@@ -138,7 +138,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # No external port - see price_reader's comment above. Same gRPC
+  # No external port - see securities_reader's comment above. Same gRPC
   # conversion applies here.
   portfolio:
     build:
@@ -250,7 +250,7 @@ services:
   # services/parser/README.md.
   #
   # No external port for its health-check server either - see
-  # price_reader's comment above; RabbitMQ is what feeds it work, not an
+  # securities_reader's comment above; RabbitMQ is what feeds it work, not an
   # inbound call. Submits trades to portfolio over gRPC now
   # (PORTFOLIO_GRPC_ADDR, was PORTFOLIO_BASE_URL) and its own health
   # server is gRPC too (GRPC_ADDR, was HTTP_ADDR, --healthcheck instead
@@ -295,7 +295,7 @@ services:
   #
   # gateway's OWN external API is still plain HTTP/JSON (unchanged for
   # the mobile client) - only the calls it makes to users/portfolio/
-  # price_reader became gRPC, hence USERS_GRPC_ADDR etc. below (bare
+  # securities_reader became gRPC, hence USERS_GRPC_ADDR etc. below (bare
   # host:port, no http:// scheme) replacing *_BASE_URL, and the
   # healthcheck staying wget-based.
   gateway:
@@ -307,14 +307,14 @@ services:
       additional_contexts:
         users_proto: ./services/users/proto
         portfolio_proto: ./services/portfolio/proto
-        pricereader_proto: ./services/price_reader/proto
+        securitiesreader_proto: ./services/securities_reader/proto
     restart: unless-stopped
     depends_on:
       users:
         condition: service_healthy
       portfolio:
         condition: service_healthy
-      price_reader:
+      securities_reader:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -327,7 +327,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a root .env file - see .env.example}
       USERS_GRPC_ADDR: users:8082
       PORTFOLIO_GRPC_ADDR: portfolio:8083
-      PRICE_READER_GRPC_ADDR: price_reader:8081
+      SECURITIES_READER_GRPC_ADDR: securities_reader:8081
       UPSTREAM_TIMEOUT: 15s
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded

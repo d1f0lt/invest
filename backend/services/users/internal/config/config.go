@@ -17,10 +17,10 @@ type Config struct {
 
 	RefreshTokenTTL time.Duration
 
-	// CleanupInterval / CleanupRetention configure the background job that
-	// deletes expired rows from refresh_tokens (internal/cleanup). Rows
-	// live for expires_at + CleanupRetention, so reuse detection keeps its
-	// evidence for a while after expiry.
+	
+	
+	
+	
 	CleanupInterval  time.Duration
 	CleanupRetention time.Duration
 
@@ -47,7 +47,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid ACCESS_TOKEN_TTL: %w", err)
 	}
 	if ttl <= 0 {
-		// A non-positive TTL would issue tokens that are already expired.
+		
 		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL must be positive, got %s", ttl)
 	}
 	cfg.AccessTokenTTL = ttl

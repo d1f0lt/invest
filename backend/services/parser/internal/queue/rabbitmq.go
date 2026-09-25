@@ -16,16 +16,16 @@ const (
 	reconnectMaxDelay = 30 * time.Second
 )
 
-// Consumer consumes report.uploaded tasks and survives RabbitMQ restarts:
-// Run redials (with backoff) whenever the connection or channel closes and
-// resubscribes.
-//
-// Our own reconnect loop is used on purpose instead of amqp091-go's
-// experimental Config.Recovery: with manual acks, a transparently recovered
-// channel would let a delivery received before the reconnect be acked by
-// its old delivery tag on the *new* channel, where that tag may belong to a
-// different message. Here every session has its own channel, so an ack for
-// a delivery from a dead channel just fails and the broker redelivers it.
+
+
+
+
+
+
+
+
+
+
 type Consumer struct {
 	url   string
 	queue string
@@ -37,8 +37,8 @@ type Consumer struct {
 	closed  bool
 }
 
-// Connect dials RabbitMQ once, so a misconfiguration fails fast at startup.
-// Later reconnects are handled by Run.
+
+
 func Connect(url, queueName string, log *slog.Logger) (*Consumer, error) {
 	c := &Consumer{url: url, queue: queueName, log: log}
 	if err := c.connect(); err != nil {
@@ -82,9 +82,9 @@ func (c *Consumer) connect() error {
 	return nil
 }
 
-// Run consumes the queue until ctx is done, calling handle with each
-// session's deliveries channel. handle must return when that channel is
-// closed (connection/channel lost) or ctx is done; Run then reconnects.
+
+
+
 func (c *Consumer) Run(ctx context.Context, consumerTag string, handle func(context.Context, <-chan amqp.Delivery)) {
 	delay := reconnectMinDelay
 	for {
@@ -132,8 +132,8 @@ func (c *Consumer) Run(ctx context.Context, consumerTag string, handle func(cont
 	}
 }
 
-// drop closes the connection behind ch (if it is still the current one) so
-// the next iteration of Run redials from scratch.
+
+
 func (c *Consumer) drop(ch *amqp.Channel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

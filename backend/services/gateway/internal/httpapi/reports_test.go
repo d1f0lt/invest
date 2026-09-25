@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -19,7 +20,7 @@ import (
 	"invest/backend/services/gateway/internal/task"
 )
 
-// --- fakes -----------------------------------------------------------------
+
 
 type fakeReportStore struct {
 	uploaded     map[string][]byte
@@ -28,9 +29,9 @@ type fakeReportStore struct {
 
 	removedKeys []string
 	removeErr   error
-	// orphaned is set when Remove is called with an already-cancelled
-	// context: the rollback must run detached from the request context, so
-	// in a correct handler this never happens.
+	
+	
+	
 	orphaned bool
 }
 
@@ -68,8 +69,8 @@ func (f *fakeReportStore) Remove(ctx context.Context, bucket, key string) error 
 type fakeReportQueue struct {
 	published []task.ReportUploaded
 	err       error
-	// onCancel, when set, is invoked at the start of Publish - used to
-	// simulate the client disconnecting while the publish is in flight.
+	
+	
 	onCancel func()
 }
 
@@ -84,22 +85,50 @@ func (f *fakeReportQueue) Publish(_ context.Context, t task.ReportUploaded) erro
 	return nil
 }
 
-// fakePortfolioClient only implements GetPortfolio (used by verifyOwnership);
-// every other method panics through the embedded nil interface, which is fine
-// because the upload handler never calls them.
+
+
 type fakePortfolioClient struct {
 	portfoliopb.PortfolioServiceClient
-	getPortfolioErr error
+	createErr error
+
+	created []*portfoliopb.CreateReportImportRequest
+	updates []*portfoliopb.UpdateReportImportStatusRequest
+	imports map[string]*portfoliopb.ReportImport
 }
 
-func (f *fakePortfolioClient) GetPortfolio(ctx context.Context, in *portfoliopb.GetPortfolioRequest, opts ...grpc.CallOption) (*portfoliopb.Portfolio, error) {
-	if f.getPortfolioErr != nil {
-		return nil, f.getPortfolioErr
+func (f *fakePortfolioClient) CreateReportImport(_ context.Context, in *portfoliopb.CreateReportImportRequest, _ ...grpc.CallOption) (*portfoliopb.ReportImport, error) {
+	if f.createErr != nil {
+		return nil, f.createErr
 	}
-	return &portfoliopb.Portfolio{Id: in.GetId(), Name: "Основной"}, nil
+	f.created = append(f.created, in)
+	imp := &portfoliopb.ReportImport{
+		Id: in.GetId(), PortfolioId: in.GetPortfolioId(), BrokerId: in.GetBrokerId(),
+		Filename: in.GetFilename(), Status: "queued",
+	}
+	if f.imports == nil {
+		f.imports = map[string]*portfoliopb.ReportImport{}
+	}
+	f.imports[in.GetId()] = imp
+	return imp, nil
 }
 
-// --- helpers ---------------------------------------------------------------
+func (f *fakePortfolioClient) UpdateReportImportStatus(ctx context.Context, in *portfoliopb.UpdateReportImportStatusRequest, _ ...grpc.CallOption) (*portfoliopb.ReportImport, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	f.updates = append(f.updates, in)
+	return &portfoliopb.ReportImport{Id: in.GetId(), Status: in.GetStatus(), Error: in.GetError()}, nil
+}
+
+func (f *fakePortfolioClient) GetReportImport(_ context.Context, in *portfoliopb.GetReportImportRequest, _ ...grpc.CallOption) (*portfoliopb.ReportImport, error) {
+	imp, ok := f.imports[in.GetId()]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "report import not found")
+	}
+	return imp, nil
+}
+
+
 
 const (
 	testBucket     = "reports"
@@ -151,12 +180,13 @@ func newTestReportsHandler(store ReportStore, queue ReportQueue, portfolio portf
 	}
 }
 
-// --- tests -----------------------------------------------------------------
+
 
 func TestUpload_HappyPath_StoresQueuesAndReturns202(t *testing.T) {
 	store := newFakeReportStore()
 	queue := &fakeReportQueue{}
-	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
+	client := &fakePortfolioClient{}
+	h := newTestReportsHandler(store, queue, client)
 
 	content := []byte("broker report bytes")
 	req := newUploadRequest(t, "user-1", "file", "report.pdf", content)
@@ -180,19 +210,30 @@ func TestUpload_HappyPath_StoresQueuesAndReturns202(t *testing.T) {
 	if pub.Bucket != testBucket {
 		t.Errorf("published bucket = %q, want %q", pub.Bucket, testBucket)
 	}
-	// exactly one object stored under the published key
+	
 	if got := store.uploaded[testBucket+"/"+pub.ObjectKey]; !bytes.Equal(got, content) {
 		t.Errorf("stored object = %q, want %q (key %q)", got, content, pub.ObjectKey)
 	}
 	if len(store.removedKeys) != 0 {
 		t.Errorf("Remove called on the happy path: %v", store.removedKeys)
 	}
+	var resp reportImportResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ID != pub.TaskID || resp.TaskID != pub.TaskID || resp.Status != "queued" {
+		t.Errorf("response = %+v, want queued import with id = task id %q", resp, pub.TaskID)
+	}
+	if len(client.created) != 1 || client.created[0].GetId() != pub.TaskID || client.created[0].GetFilename() != "report.pdf" {
+		t.Errorf("CreateReportImport calls = %v", client.created)
+	}
 }
 
 func TestUpload_PublishFails_RollsBackStoredObject(t *testing.T) {
 	store := newFakeReportStore()
 	queue := &fakeReportQueue{err: errors.New("rabbit down")}
-	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
+	client := &fakePortfolioClient{}
+	h := newTestReportsHandler(store, queue, client)
 
 	req := newUploadRequest(t, "user-1", "file", "report.pdf", []byte("bytes"))
 	rec := httptest.NewRecorder()
@@ -218,6 +259,30 @@ func TestUpload_PublishFails_RollsBackStoredObject(t *testing.T) {
 	if store.orphaned {
 		t.Error("rollback ran with a cancelled context")
 	}
+	if len(client.updates) != 1 || client.updates[0].GetStatus() != "failed" {
+		t.Errorf("status updates = %v, want the import marked failed", client.updates)
+	}
+}
+
+func TestUpload_StoreFails_MarksImportFailed(t *testing.T) {
+	store := newFakeReportStore()
+	store.uploadErr = errors.New("minio down")
+	queue := &fakeReportQueue{}
+	client := &fakePortfolioClient{}
+	h := newTestReportsHandler(store, queue, client)
+
+	rec := httptest.NewRecorder()
+	h.Upload(rec, newUploadRequest(t, "user-1", "file", "report.pdf", []byte("bytes")))
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if len(queue.published) != 0 {
+		t.Error("published a task for a file that wasn't stored")
+	}
+	if len(client.updates) != 1 || client.updates[0].GetStatus() != "failed" {
+		t.Errorf("status updates = %v, want the import marked failed", client.updates)
+	}
 }
 
 func TestUpload_PublishFailsAfterClientDisconnect_RollbackStillRuns(t *testing.T) {
@@ -231,9 +296,9 @@ func TestUpload_PublishFailsAfterClientDisconnect_RollbackStillRuns(t *testing.T
 
 	h.Upload(rec, req)
 
-	// The client's context was cancelled while publishing; the compensating
-	// Remove must still have been attempted with a live (detached) context,
-	// otherwise the object would be orphaned.
+	
+	
+	
 	if store.orphaned {
 		t.Error("Remove saw a cancelled context - rollback is not detached from the request")
 	}
@@ -256,8 +321,8 @@ func TestUpload_PublishFailsAndRollbackFails_StillResponds502(t *testing.T) {
 
 	h.Upload(rec, req)
 
-	// A failed rollback is logged (bucket+object_key for manual cleanup) but
-	// must not change the client-facing response or panic.
+	
+	
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502; body: %s", rec.Code, rec.Body.String())
 	}
@@ -269,7 +334,7 @@ func TestUpload_PublishFailsAndRollbackFails_StillResponds502(t *testing.T) {
 func TestUpload_PortfolioNotFound_404WithoutTouchingStore(t *testing.T) {
 	store := newFakeReportStore()
 	queue := &fakeReportQueue{}
-	client := &fakePortfolioClient{getPortfolioErr: status.Error(codes.NotFound, "portfolio not found")}
+	client := &fakePortfolioClient{createErr: status.Error(codes.NotFound, "portfolio not found")}
 	h := newTestReportsHandler(store, queue, client)
 
 	req := newUploadRequest(t, "user-1", "file", "report.pdf", []byte("bytes"))
@@ -288,7 +353,7 @@ func TestUpload_PortfolioNotFound_404WithoutTouchingStore(t *testing.T) {
 func TestUpload_PortfolioServiceUnavailable_502WithoutTouchingStore(t *testing.T) {
 	store := newFakeReportStore()
 	queue := &fakeReportQueue{}
-	client := &fakePortfolioClient{getPortfolioErr: status.Error(codes.Unavailable, "connection refused")}
+	client := &fakePortfolioClient{createErr: status.Error(codes.Unavailable, "connection refused")}
 	h := newTestReportsHandler(store, queue, client)
 
 	req := newUploadRequest(t, "user-1", "file", "report.pdf", []byte("bytes"))
@@ -337,7 +402,7 @@ func TestUpload_MissingBrokerField_400WithoutTouchingStore(t *testing.T) {
 	queue := &fakeReportQueue{}
 	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
 
-	// broker="" -> the field is not written to the form at all
+	
 	req := newUploadRequestWithBroker(t, "user-1", "file", "report.pdf", []byte("bytes"), "")
 	rec := httptest.NewRecorder()
 
@@ -366,6 +431,82 @@ func TestUpload_BrokerIsNormalized(t *testing.T) {
 	}
 	if got := queue.published[0].Broker; got != "тинькофф-инвестиции" {
 		t.Errorf("published broker = %q, want %q", got, "тинькофф-инвестиции")
+	}
+}
+
+func TestUpload_UnsupportedFormat_400WithMessage(t *testing.T) {
+	store := newFakeReportStore()
+	queue := &fakeReportQueue{}
+	msg := "Неподдерживаемый формат файла. Нужен HTML"
+	h := newTestReportsHandler(store, queue, &fakePortfolioClient{createErr: status.Error(codes.InvalidArgument, msg)})
+
+	rec := httptest.NewRecorder()
+	h.Upload(rec, newUploadRequest(t, "user-1", "file", "report.pdf", []byte("bytes")))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body errorResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Error != msg {
+		t.Errorf("error = %q, want %q", body.Error, msg)
+	}
+	if len(store.uploaded) != 0 || len(queue.published) != 0 {
+		t.Error("store/queue touched for a rejected file")
+	}
+}
+
+func TestGetReportImport_OtherPortfolio404(t *testing.T) {
+	client := &fakePortfolioClient{imports: map[string]*portfoliopb.ReportImport{
+		"imp-1": {Id: "imp-1", PortfolioId: testPortfolio, Status: "done", TradesCreated: 3},
+	}}
+	h := newTestReportsHandler(newFakeReportStore(), &fakeReportQueue{}, client)
+
+	get := func(portfolioID, id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/portfolios/"+portfolioID+"/reports/"+id, nil)
+		req.SetPathValue("id", portfolioID)
+		req.SetPathValue("report_id", id)
+		req = req.WithContext(context.WithValue(req.Context(), userIDContextKey, "user-1"))
+		rec := httptest.NewRecorder()
+		h.Get(rec, req)
+		return rec
+	}
+
+	rec := get(testPortfolio, "imp-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var resp reportImportResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Status != "done" || resp.TradesCreated != 3 {
+		t.Errorf("response = %+v", resp)
+	}
+
+	if rec := get("p-other", "imp-1"); rec.Code != http.StatusNotFound {
+		t.Errorf("other portfolio: status = %d, want 404", rec.Code)
+	}
+	if rec := get(testPortfolio, "missing"); rec.Code != http.StatusNotFound {
+		t.Errorf("missing import: status = %d, want 404", rec.Code)
+	}
+}
+
+func TestBrokerIcon(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/static/brokers/ICONS.md", nil)
+	req.SetPathValue("file", "ICONS.md")
+	rec := httptest.NewRecorder()
+	handleBrokerIcon(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("existing file: status = %d, want 200", rec.Code)
+	}
+
+	for _, name := range []string{"nope.png", "../static.go"} {
+		req := httptest.NewRequest(http.MethodGet, "/static/brokers/x", nil)
+		req.SetPathValue("file", name)
+		rec := httptest.NewRecorder()
+		handleBrokerIcon(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q: status = %d, want 404", name, rec.Code)
+		}
 	}
 }
 

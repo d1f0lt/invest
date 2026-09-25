@@ -1,9 +1,9 @@
 USERS_SRC := ../users/proto/users.proto
 PORTFOLIO_SRC := ../portfolio/proto/portfolio.proto
-PRICEREADER_SRC := ../price_reader/proto/pricereader.proto
+SECURITIESREADER_SRC := ../securities_reader/proto/securitiesreader.proto
 
 .PHONY: proto
-proto: proto-users proto-portfolio proto-pricereader
+proto: proto-users proto-portfolio proto-securitiesreader
 
 .PHONY: proto-users
 proto-users:
@@ -25,18 +25,18 @@ proto-portfolio:
 		internal/portfoliopb/portfolio.proto
 	rm internal/portfoliopb/portfolio.proto
 
-.PHONY: proto-pricereader
-proto-pricereader:
-	mkdir -p internal/pricereaderpb
-	cp $(PRICEREADER_SRC) internal/pricereaderpb/pricereader.proto
-	protoc -I internal/pricereaderpb \
-		--go_out=internal/pricereaderpb --go_opt=paths=source_relative \
-		--go-grpc_out=internal/pricereaderpb --go-grpc_opt=paths=source_relative \
-		internal/pricereaderpb/pricereader.proto
-	rm internal/pricereaderpb/pricereader.proto
+.PHONY: proto-securitiesreader
+proto-securitiesreader:
+	mkdir -p internal/securitiesreaderpb
+	cp $(SECURITIESREADER_SRC) internal/securitiesreaderpb/securitiesreader.proto
+	protoc -I internal/securitiesreaderpb \
+		--go_out=internal/securitiesreaderpb --go_opt=paths=source_relative \
+		--go-grpc_out=internal/securitiesreaderpb --go-grpc_opt=paths=source_relative \
+		internal/securitiesreaderpb/securitiesreader.proto
+	rm internal/securitiesreaderpb/securitiesreader.proto
 
 .PHONY: clean
-clean: clean-users clean-portfolio clean-pricereader
+clean: clean-users clean-portfolio clean-securitiesreader
 
 .PHONY: clean-users
 clean-users:
@@ -46,6 +46,6 @@ clean-users:
 clean-portfolio:
 	rm -rf internal/portfoliopb
 
-.PHONY: clean-pricereader
-clean-pricereader:
-	rm -rf internal/pricereaderpb
+.PHONY: clean-securitiesreader
+clean-securitiesreader:
+	rm -rf internal/securitiesreaderpb

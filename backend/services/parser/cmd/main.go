@@ -91,8 +91,8 @@ func main() {
 		Portfolio: portfolio,
 		Log:       log,
 	}
-	// Consumer.Run reconnects and resubscribes after RabbitMQ restarts;
-	// w.Run returns whenever a session's deliveries channel closes.
+	
+	
 	go consumer.Run(ctx, "parser", w.Run)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)

@@ -25,6 +25,9 @@ type fakeStore struct {
 	cash       map[string][]storage.CashOperation
 	prices     map[string]float64
 	nextID     int
+
+	brokers map[string]storage.Broker
+	imports map[string]storage.ReportImport
 }
 
 func newFakeStore() *fakeStore {
@@ -33,6 +36,11 @@ func newFakeStore() *fakeStore {
 		trades:     map[string][]storage.Trade{},
 		cash:       map[string][]storage.CashOperation{},
 		prices:     map[string]float64{},
+		brokers: map[string]storage.Broker{
+			"sber": {ID: "sber", Name: "СберИнвестиции", FileFormats: []string{"html"}, Enabled: true},
+			"old":  {ID: "old", Name: "Old", FileFormats: []string{"html"}, Enabled: false},
+		},
+		imports: map[string]storage.ReportImport{},
 	}
 }
 
@@ -85,8 +93,8 @@ func (f *fakeStore) CreateTrade(_ context.Context, t storage.Trade) (storage.Tra
 }
 
 func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade) ([]storage.Trade, error) {
-	// Mirror the real store's all-or-nothing semantics: validate every
-	// trade first, apply nothing if any fails.
+	
+	
 	created := make([]storage.Trade, 0, len(trades))
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {
@@ -106,9 +114,9 @@ func (f *fakeStore) ListTrades(_ context.Context, portfolioID string) ([]storage
 	return f.trades[portfolioID], nil
 }
 
-// ImportReport mirrors the real store: all-or-nothing, rows whose
-// external_id already exists in the portfolio are skipped.
-func (f *fakeStore) ImportReport(_ context.Context, portfolioID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error) {
+
+
+func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error) {
 	var res storage.ImportResult
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {
@@ -141,6 +149,13 @@ func (f *fakeStore) ImportReport(_ context.Context, portfolioID string, trades [
 		f.cash[portfolioID] = append(f.cash[portfolioID], c)
 		known["c"+c.ExternalID] = c.ExternalID != ""
 		res.CashCreated++
+	}
+	if r, ok := f.imports[importID]; ok && r.PortfolioID == portfolioID &&
+		(r.Status == storage.ImportQueued || r.Status == storage.ImportProcessing) {
+		r.Status = storage.ImportDone
+		r.TradesCreated, r.TradesSkipped = res.TradesCreated, res.TradesSkipped
+		r.CashCreated, r.CashSkipped = res.CashCreated, res.CashSkipped
+		f.imports[importID] = r
 	}
 	return res, nil
 }
@@ -540,7 +555,7 @@ func TestImportReport_IdempotentAndFeedsPnL(t *testing.T) {
 	if sum.GetTotalDividends() != 300 || sum.GetNetDeposits() != 6000 || sum.GetTotalAccruedInterest() != -82.26 {
 		t.Errorf("summary = %+v", sum)
 	}
-	// unrealized SBER 10*320-3001 = 199 (bond has no price) + dividend 300 - НКД 82.26
+	
 	if d := sum.GetTotalPnl() - 416.74; d > 1e-6 || d < -1e-6 {
 		t.Errorf("total pnl = %v, want 416.74", sum.GetTotalPnl())
 	}

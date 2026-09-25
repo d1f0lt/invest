@@ -17,7 +17,7 @@ import (
 	"invest/backend/services/gateway/internal/upstream"
 )
 
-// renameClient only implements UpdatePortfolio and records the request.
+
 type renameClient struct {
 	portfoliopb.PortfolioServiceClient
 	got *portfoliopb.UpdatePortfolioRequest

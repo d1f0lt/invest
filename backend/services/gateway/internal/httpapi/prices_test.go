@@ -6,13 +6,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	pricereaderpb "invest/backend/services/gateway/internal/pricereaderpb"
+	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 )
 
 func TestToPriceView_CarriesOptionalFields(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	last := 289.5
-	p := &pricereaderpb.PriceView{
+	p := &securitiesreaderpb.PriceView{
 		Secid: "SBER", Board: "TQBR",
 		LastPrice:   &last,
 		CollectedAt: timestamppb.New(now),

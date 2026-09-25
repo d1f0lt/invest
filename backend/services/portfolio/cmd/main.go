@@ -1,8 +1,8 @@
-// Command portfolio runs the portfolio microservice: portfolios, trade
-// ledgers, and derived holdings/P&L - now over gRPC
-// (invest.portfolio.v1.PortfolioService), not HTTP. See
-// architecture-decisions.md, "перевод внутреннего взаимодействия
-// сервисов на gRPC".
+
+
+
+
+
 package main
 
 import (
@@ -62,9 +62,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Plaintext, no TLS: the same trust boundary as the HTTP API this
-	// replaces - unreachable except from inside the docker-compose
-	// network (see architecture-decisions.md).
+	
+	
+	
 	grpcServer := grpc.NewServer()
 
 	portfoliopb.RegisterPortfolioServiceServer(grpcServer, &grpcserver.Server{
@@ -74,8 +74,8 @@ func main() {
 	grpc_health_v1.RegisterHealthServer(grpcServer, &health.Server{
 		Probe: func(ctx context.Context) error { return store.Ping(ctx) },
 	})
-	// Lets `grpcurl -plaintext localhost:8083 list` (and similar manual
-	// debugging) work without needing the .proto files on hand.
+	
+	
 	reflection.Register(grpcServer)
 
 	go func() {
@@ -92,9 +92,9 @@ func main() {
 	log.Info("portfolio service stopped")
 }
 
-// runHealthcheckClient dials addr and calls the standard gRPC health
-// check as a plain client, in a separate short-lived process invocation
-// of this same binary - this is what the Dockerfile's HEALTHCHECK runs.
+
+
+
 func runHealthcheckClient(addr string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

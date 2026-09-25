@@ -1,4 +1,4 @@
-module invest/backend/services/price_reader
+module invest/backend/services/securities_reader
 
 go 1.24
 

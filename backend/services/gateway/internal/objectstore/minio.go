@@ -41,9 +41,9 @@ func (s *Store) Upload(ctx context.Context, bucket, key string, r io.Reader, siz
 	return nil
 }
 
-// Remove deletes an object from the bucket. Deleting a nonexistent object is
-// not an error (S3 semantics), so Remove is idempotent - safe to call again
-// as part of a compensation path.
+
+
+
 func (s *Store) Remove(ctx context.Context, bucket, key string) error {
 	if err := s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("remove object %s/%s: %w", bucket, key, err)

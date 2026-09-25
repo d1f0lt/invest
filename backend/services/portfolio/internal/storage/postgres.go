@@ -13,28 +13,28 @@ import (
 var (
 	ErrNotFound          = errors.New("not found")
 	ErrUnknownInstrument = errors.New("unknown instrument: no such secid/board in securities")
-	// ErrDuplicate: a trade/cash operation with the same external_id is
-	// already stored in this portfolio.
+	
+	
 	ErrDuplicate = errors.New("duplicate external_id")
 )
 
 const (
 	postgresForeignKeyViolation = "23503"
 	postgresUniqueViolation     = "23505"
-	// invalid_text_representation: e.g. a portfolio id that isn't a UUID.
+	
 	postgresInvalidTextRepresentation = "22P02"
 )
 
-// isInvalidText reports whether err is Postgres rejecting a malformed
-// value (a non-UUID id) - such an id can't match any row.
+
+
 func isInvalidText(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == postgresInvalidTextRepresentation
 }
 
-// mapInsertErr turns constraint violations into the package's sentinel
-// errors. For a foreign-key violation the offending instrument is named,
-// so a failed report import says which security price_updater lacks.
+
+
+
 func mapInsertErr(err error, t Trade) error {
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) {
@@ -70,7 +70,7 @@ type Trade struct {
 	CreatedAt   time.Time
 
 	AccruedInterest float64
-	// ExternalID is "" for trades entered by hand (stored as NULL).
+	
 	ExternalID string
 }
 
@@ -81,15 +81,15 @@ type CashOperation struct {
 	Amount      float64
 	Currency    string
 	OccurredAt  time.Time
-	SecID       string // "" = none (NULL)
+	SecID       string 
 	Board       string
 	Description string
 	ExternalID  string
 	CreatedAt   time.Time
 }
 
-// ImportResult counts what ImportReport created vs. skipped as already
-// imported.
+
+
 type ImportResult struct {
 	TradesCreated, TradesSkipped int
 	CashCreated, CashSkipped     int
@@ -166,8 +166,8 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 	`
 	var p Portfolio
 	err := s.db.QueryRowContext(ctx, stmt, id).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
-	// A malformed (non-UUID) id can't exist either: NotFound, not a
-	// 500-style internal error.
+	
+	
 	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
 		return Portfolio{}, ErrNotFound
 	}
@@ -177,8 +177,8 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 	return p, nil
 }
 
-// RenamePortfolio sets a new name and bumps updated_at. Ownership is
-// checked by the caller (grpcserver.loadOwnedPortfolio).
+
+
 func (s *Store) RenamePortfolio(ctx context.Context, id, name string) (Portfolio, error) {
 	const stmt = `
 		UPDATE portfolios SET name = $2, updated_at = now()
@@ -217,12 +217,12 @@ func (s *Store) CreateTrade(ctx context.Context, t Trade) (Trade, error) {
 	return out, nil
 }
 
-// CreateTradesBatch inserts all trades in a single transaction: either
-// every trade is created or none is. Inserted in the given order, so the
-// returned slice matches the input 1:1 (needed by the CreateTrades RPC,
-// which promises response order == request order). A foreign-key
-// violation on any trade rolls the whole batch back and surfaces as
-// ErrUnknownInstrument, same as a single failed CreateTrade.
+
+
+
+
+
+
 func (s *Store) CreateTradesBatch(ctx context.Context, trades []Trade) ([]Trade, error) {
 	if len(trades) == 0 {
 		return nil, nil
@@ -307,10 +307,10 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 		secids[i], boards[i] = inst[0], inst[1]
 	}
 
-	// MOEX quotes bonds in % of face value; trades store money per bond
-	// (see trades.price), so bond quotes are converted with the face
-	// value price_updater stores alongside (securities.price_in_percent,
-	// securities.face_value - price_updater migration 0002).
+	
+	
+	
+	
 	const stmt = `
 		SELECT lp.secid, lp.board,
 		       CASE WHEN s.price_in_percent AND s.face_value IS NOT NULL
@@ -341,14 +341,19 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 	return out, rows.Err()
 }
 
-// ImportReport inserts a broker report's trades and cash operations in
-// one transaction. Rows whose external_id already exists in the
-// portfolio are skipped (ON CONFLICT DO NOTHING), which makes importing
-// the same report twice, or two overlapping reports, a no-op for the
-// repeated rows. Any other failure - notably a trade on an instrument
-// price_updater doesn't know (ErrUnknownInstrument) - rolls back the
-// whole import.
-func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []Trade, cash []CashOperation) (ImportResult, error) {
+
+
+
+
+
+
+
+
+
+
+
+
+func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, trades []Trade, cash []CashOperation) (ImportResult, error) {
 	var res ImportResult
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -401,6 +406,21 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []T
 			return ImportResult{}, fmt.Errorf("insert cash operation: %w", err)
 		default:
 			res.CashCreated++
+		}
+	}
+
+	if importID != "" {
+		const doneStmt = `
+			UPDATE report_imports
+			SET status = 'done', error = '',
+			    trades_created = $3, trades_skipped = $4,
+			    cash_operations_created = $5, cash_operations_skipped = $6,
+			    updated_at = now(), finished_at = now()
+			WHERE id = $1 AND portfolio_id = $2 AND status IN ('queued', 'processing')
+		`
+		if _, err := tx.ExecContext(ctx, doneStmt, importID, portfolioID,
+			res.TradesCreated, res.TradesSkipped, res.CashCreated, res.CashSkipped); err != nil && !isInvalidText(err) {
+			return ImportResult{}, fmt.Errorf("mark report import done: %w", err)
 		}
 	}
 

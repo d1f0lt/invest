@@ -1,22 +1,26 @@
-// Contract for the price_reader service: read-only access to the latest
+// Contract for the securities_reader service: read-only access to the latest
 // known price per security (GetPrices - mirrors the previous
 // "GET /api/v1/prices" HTTP endpoint 1:1) and to the candles price_updater
-// keeps for price charts (GetCandles).
+// keeps for price charts (GetCandles), plus search over the securities
+// reference (SearchSecurities). Formerly price_reader.
 syntax = "proto3";
 
-package invest.pricereader.v1;
+package invest.securitiesreader.v1;
 
-option go_package = "invest/backend/services/price_reader/proto;pricereaderpb";
+option go_package = "invest/backend/services/securities_reader/proto;securitiesreaderpb";
 
 import "google/protobuf/timestamp.proto";
 
 // GetPrices carries no auth requirement at this level, same as the old
-// HTTP endpoint: price_reader has never checked caller identity itself,
+// HTTP endpoint: securities_reader has never checked caller identity itself,
 // only gateway gates access to it (requireAuth) before ever proxying a
 // call through.
-service PriceReaderService {
+service SecuritiesReaderService {
   rpc GetPrices(GetPricesRequest) returns (GetPricesResponse);
   rpc GetCandles(GetCandlesRequest) returns (GetCandlesResponse);
+  // Search by ticker (SECID), short/full name or ISIN for the asset search
+  // screen. Case-insensitive, "ё" == "е".
+  rpc SearchSecurities(SearchSecuritiesRequest) returns (SearchSecuritiesResponse);
 }
 
 message GetPricesRequest {
@@ -98,4 +102,18 @@ message GetCandlesResponse {
   CandleInterval interval = 4;
   // Oldest first.
   repeated Candle candles = 5;
+}
+
+message SearchSecuritiesRequest {
+  // Required, 1..64 characters after trimming; InvalidArgument otherwise.
+  string query = 1;
+  // 0 -> 20; capped at 50.
+  int32 limit = 2;
+}
+
+// Best matches first: exact ticker/ISIN, ticker prefix, name prefix,
+// name word prefix, then substring anywhere. Within a group: shares
+// (TQBR), funds (TQTF), OFZ (TQOB), corporate bonds (TQCB), then by ticker.
+message SearchSecuritiesResponse {
+  repeated PriceView securities = 1;
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Candle intervals as stored by price_updater in the candles table.
+
 const (
 	IntervalHour = "1h"
 	IntervalDay  = "1d"
@@ -24,7 +24,7 @@ type Candle struct {
 	Value  *float64
 }
 
-// BoardsOf lists the boards price_updater knows the security on.
+
 func (s *Store) BoardsOf(ctx context.Context, secid string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT board FROM securities WHERE secid = $1 ORDER BY board`, secid)
 	if err != nil {
@@ -42,7 +42,7 @@ func (s *Store) BoardsOf(ctx context.Context, secid string) ([]string, error) {
 	return out, rows.Err()
 }
 
-// LatestCandleStart returns the start of the newest candle of the interval.
+
 func (s *Store) LatestCandleStart(ctx context.Context, secid, board, interval string) (time.Time, bool, error) {
 	var t time.Time
 	err := s.db.QueryRowContext(ctx, `
@@ -59,8 +59,8 @@ func (s *Store) LatestCandleStart(ctx context.Context, secid, board, interval st
 	return t, true, nil
 }
 
-// Candles returns candles of the interval starting at or after from,
-// oldest first.
+
+
 func (s *Store) Candles(ctx context.Context, secid, board, interval string, from time.Time) ([]Candle, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT start_at, open, high, low, close, volume, value
@@ -75,8 +75,8 @@ func (s *Store) Candles(ctx context.Context, secid, board, interval string, from
 	return scanCandles(rows)
 }
 
-// WeeklyCandles aggregates all stored daily candles into weeks
-// (Monday 00:00 Moscow time), oldest first.
+
+
 func (s *Store) WeeklyCandles(ctx context.Context, secid, board string) ([]Candle, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT

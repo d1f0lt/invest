@@ -434,15 +434,15 @@ func TestRefreshToken_ReuseAfterGracePeriodRevokesWholeFamily(t *testing.T) {
 	s := newTestServer(store)
 	login := loginTestUser(t, s, store)
 
-	// Legitimate client rotates: old token revoked, new one issued in the
-	// same family.
+	
+	
 	rotated, err := s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if err != nil {
 		t.Fatalf("RefreshToken: %v", err)
 	}
 
-	// Attacker replays the OLD token long after the grace period: the whole
-	// family (including the legitimate client's new token) must be revoked.
+	
+	
 	store.setRevokedAt(login.RefreshToken, time.Now().Add(-2*reuseGracePeriod))
 	_, err = s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if status.Code(err) != codes.Unauthenticated {
@@ -465,8 +465,8 @@ func TestRefreshToken_ReuseWithinGracePeriodKeepsFamilyAlive(t *testing.T) {
 		t.Fatalf("RefreshToken: %v", err)
 	}
 
-	// A benign double-refresh race (client retries with the token it just
-	// rotated away, seconds later) must NOT kill the family.
+	
+	
 	store.setRevokedAt(login.RefreshToken, time.Now())
 	_, err = s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if status.Code(err) != codes.Unauthenticated {

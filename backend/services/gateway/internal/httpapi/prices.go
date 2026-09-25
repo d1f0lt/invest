@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	pricereaderpb "invest/backend/services/gateway/internal/pricereaderpb"
+	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 )
 
 type priceView struct {
@@ -26,7 +26,7 @@ type priceView struct {
 	CollectedAt    time.Time `json:"collected_at"`
 }
 
-func toPriceView(p *pricereaderpb.PriceView) priceView {
+func toPriceView(p *securitiesreaderpb.PriceView) priceView {
 	return priceView{
 		SecID: p.GetSecid(), Board: p.GetBoard(),
 		ShortName: p.ShortName, SecName: p.SecName, ISIN: p.Isin, Currency: p.Currency,
@@ -46,7 +46,7 @@ func (h *Handlers) handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := h.callCtx(r)
 	defer cancel()
 
-	resp, err := h.Upstream.PriceReader.GetPrices(ctx, &pricereaderpb.GetPricesRequest{Tickers: tickers})
+	resp, err := h.Upstream.SecuritiesReader.GetPrices(ctx, &securitiesreaderpb.GetPricesRequest{Tickers: tickers})
 	if err != nil {
 		writeUpstreamError(w, h.Log, err)
 		return

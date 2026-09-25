@@ -8,10 +8,10 @@ import (
 type Config struct {
 	DatabaseURL string
 
-	// GRPCAddr is the address the gRPC server listens on, e.g. ":8083".
-	// Renamed 2026-09-20 from HTTPAddr/HTTP_ADDR: this service no longer
-	// speaks HTTP at all - see architecture-decisions.md, "перевод
-	// внутреннего взаимодействия сервисов на gRPC".
+	
+	
+	
+	
 	GRPCAddr string
 
 	LogLevel string
