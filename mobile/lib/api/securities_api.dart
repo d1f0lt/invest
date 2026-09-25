@@ -56,10 +56,13 @@ class SecuritiesApi {
 
   final ApiClient _client;
 
-  /// `GET /api/v1/prices` без `tickers` → все бумаги с последними ценами.
-  Future<List<Security>> all() async {
-    final json = await _client.get('/api/v1/prices', auth: true) as Map<String, dynamic>?;
-    return (json?['prices'] as List<dynamic>? ?? const [])
+  /// `GET /api/v1/securities?q=...&limit=...` — поиск по тикеру, названию
+  /// и ISIN в securities_reader. Порядок — лучшие совпадения первыми.
+  Future<List<Security>> search(String query, {int limit = 30}) async {
+    final q = Uri.encodeQueryComponent(query.trim());
+    final json = await _client.get('/api/v1/securities?q=$q&limit=$limit', auth: true)
+        as Map<String, dynamic>?;
+    return (json?['securities'] as List<dynamic>? ?? const [])
         .map((e) => Security.fromJson(e as Map<String, dynamic>))
         .where((s) => s.secid.isNotEmpty)
         .toList();
