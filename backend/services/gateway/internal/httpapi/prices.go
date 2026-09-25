@@ -24,6 +24,7 @@ type priceView struct {
 	TradingStatus  *string   `json:"trading_status"`
 	MoexUpdateTime *string   `json:"moex_update_time"`
 	CollectedAt    time.Time `json:"collected_at"`
+	PrevClose      *float64  `json:"prev_close"`
 }
 
 func toPriceView(p *securitiesreaderpb.PriceView) priceView {
@@ -34,6 +35,7 @@ func toPriceView(p *securitiesreaderpb.PriceView) priceView {
 		ValueToday: p.ValueToday, VolumeToday: p.VolumeToday,
 		TradingStatus: p.TradingStatus, MoexUpdateTime: p.MoexUpdateTime,
 		CollectedAt: p.GetCollectedAt().AsTime(),
+		PrevClose:   p.PrevClose,
 	}
 }
 

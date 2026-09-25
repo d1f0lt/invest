@@ -19,8 +19,10 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"invest/backend/services/securities_reader/internal/config"
+	"invest/backend/services/securities_reader/internal/dohod"
 	"invest/backend/services/securities_reader/internal/grpcserver"
 	"invest/backend/services/securities_reader/internal/health"
+	"invest/backend/services/securities_reader/internal/moex"
 	"invest/backend/services/securities_reader/internal/storage"
 	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
@@ -70,6 +72,9 @@ func main() {
 		Store: store,
 		Log:   log,
 		Loc:   moscow,
+		Moex:  moex.New(cfg.MoexISSBaseURL, cfg.MoexTimeout),
+
+		DividendSource: dohod.New(cfg.DividendsBaseURL, cfg.MoexTimeout),
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, &health.Server{
 		Probe: func(ctx context.Context) error { return store.Ping(ctx) },

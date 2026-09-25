@@ -95,6 +95,11 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
       GRPC_ADDR: ":8081"
       LOG_LEVEL: info
+      MOEX_ISS_BASE_URL: https://iss.moex.com/iss
+      MOEX_TIMEOUT: 10s
+      # MOEX ISS no longer serves dividends; the asset card's dividend
+      # history is parsed from dohod.ru (cached for a day per security).
+      DIVIDENDS_BASE_URL: https://www.dohod.ru/ik/analytics/dividend
     healthcheck:
       test: ["CMD", "/app/securities_reader", "--healthcheck"]
       interval: 10s

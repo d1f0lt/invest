@@ -149,6 +149,7 @@ func buildRows(board string, quotes map[string]moexclient.MarketQuote, collected
 			TradingStatus:  q.TradingStatus,
 			MoexUpdateTime: q.UpdateTime,
 			CollectedAt:    collectedAt,
+			PrevClose:      q.PrevClose,
 		})
 
 		if q.Last == nil || q.TradingStatus == nil || *q.TradingStatus != tradingStatusTrading {

@@ -25,6 +25,7 @@ type PriceView struct {
 	TradingStatus  *string
 	MoexUpdateTime *string
 	CollectedAt    time.Time
+	PrevClose      *float64
 }
 
 type Store struct {
@@ -62,7 +63,8 @@ const selectLatestPrices = `
 	SELECT
 		lp.secid, lp.board, sec.short_name, sec.sec_name, sec.isin, sec.currency,
 		lp.last_price, lp.open_price, lp.high_price, lp.low_price,
-		lp.value_today, lp.volume_today, lp.trading_status, lp.moex_update_time, lp.collected_at
+		lp.value_today, lp.volume_today, lp.trading_status, lp.moex_update_time, lp.collected_at,
+		lp.prev_close
 	FROM latest_prices lp
 	LEFT JOIN securities sec ON sec.secid = lp.secid AND sec.board = lp.board
 `
@@ -99,6 +101,7 @@ func scanPriceRows(rows *sql.Rows) ([]PriceView, error) {
 			&v.SecID, &v.Board, &v.ShortName, &v.SecName, &v.ISIN, &v.Currency,
 			&v.Last, &v.Open, &v.High, &v.Low,
 			&v.ValueToday, &v.VolumeToday, &v.TradingStatus, &v.MoexUpdateTime, &v.CollectedAt,
+			&v.PrevClose,
 		); err != nil {
 			return nil, fmt.Errorf("scan price row: %w", err)
 		}

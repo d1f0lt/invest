@@ -105,3 +105,18 @@ func TestHandleGetCandles_UpstreamNotFound(t *testing.T) {
 		t.Errorf("status = %d", rec.Code)
 	}
 }
+
+func TestHandleGetCandles_FiveYears(t *testing.T) {
+	f := &fakeSecuritiesReader{resp: &securitiesreaderpb.GetCandlesResponse{
+		Secid: "SBER", Board: "TQBR",
+		Range:    securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS,
+		Interval: securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK,
+	}}
+	rec := serveCandles(candlesHandlers(f), "/api/v1/prices/SBER/candles?range=5y")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	}
+	if f.got.GetRange() != securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS {
+		t.Errorf("range = %v", f.got.GetRange())
+	}
+}

@@ -36,6 +36,11 @@ func main() {
 	}
 	defer store.Close()
 
+	if err := store.EnsureSchema(ctx); err != nil {
+		log.Error("failed to update database schema", "error", err)
+		os.Exit(1)
+	}
+
 	client := moexclient.New(cfg.MoexISSBaseURL, cfg.HTTPTimeout)
 
 	
