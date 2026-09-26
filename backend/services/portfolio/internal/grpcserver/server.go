@@ -38,7 +38,7 @@ type Store interface {
 	CreateTrade(ctx context.Context, t storage.Trade) (storage.Trade, error)
 	CreateTradesBatch(ctx context.Context, trades []storage.Trade) ([]storage.Trade, error)
 	ListTrades(ctx context.Context, portfolioID string) ([]storage.Trade, error)
-	ImportReport(ctx context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error)
+	ImportReport(ctx context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, opening *storage.OpeningScope) (storage.ImportResult, error)
 	ListCashOperations(ctx context.Context, portfolioID string) ([]storage.CashOperation, error)
 	LatestPrices(ctx context.Context, instruments [][2]string) (map[string]float64, error)
 
@@ -199,6 +199,8 @@ func (s *Server) validateTrade(t *portfoliopb.TradeInput) (storage.Trade, error)
 
 		AccruedInterest: t.GetAccruedInterest(),
 		ExternalID:      strings.TrimSpace(t.GetExternalId()),
+		SecurityName:    strings.TrimSpace(t.GetSecurityName()),
+		ISIN:            strings.ToUpper(strings.TrimSpace(t.GetIsin())),
 	}, nil
 }
 
@@ -524,7 +526,12 @@ func (s *Server) ImportReport(ctx context.Context, req *portfoliopb.ImportReport
 		}
 	}
 
-	res, err := s.Store.ImportReport(ctx, p.ID, importID, trades, cash)
+	var opening *storage.OpeningScope
+	if key := strings.TrimSpace(req.GetAccountKey()); key != "" && req.GetPeriodStart() != nil {
+		opening = &storage.OpeningScope{AccountKey: key, PeriodStart: req.GetPeriodStart().AsTime()}
+	}
+
+	res, err := s.Store.ImportReport(ctx, p.ID, importID, trades, cash, opening)
 	if err != nil {
 		return nil, s.insertError("import report", err)
 	}

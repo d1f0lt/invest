@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -72,6 +73,11 @@ type Trade struct {
 	AccruedInterest float64
 	
 	ExternalID string
+
+	// Только для импорта отчётов: название и ISIN бумаги из отчёта
+	// (см. ensureSecurities). В БД сделки не сохраняются.
+	SecurityName string
+	ISIN         string
 }
 
 type CashOperation struct {
@@ -353,7 +359,105 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 
 
 
-func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, trades []Trade, cash []CashOperation) (ImportResult, error) {
+// OpeningMarker — часть external_id строк вводного остатка:
+// "<account_key>:opening:<YYYY-MM-DD>:...".
+const OpeningMarker = ":opening:"
+
+// OpeningScope — счёт брокера и начало периода отчёта, для вводного остатка.
+type OpeningScope struct {
+	AccountKey  string
+	PeriodStart time.Time
+}
+
+// applyOpening решает судьбу вводного остатка отчёта (в транзакции импорта):
+//   - вводные остатки этого счёта с датой позже начала периода удаляются —
+//     этот отчёт приносит настоящую историю за то время;
+//   - если по счёту уже есть строки раньше начала периода (более ранний
+//     отчёт), вводный остаток отчёта не нужен — его строки отбрасываются
+//     (попадают в skipped).
+func applyOpening(ctx context.Context, tx *sql.Tx, portfolioID string, scope OpeningScope,
+	trades []Trade, cash []CashOperation, res *ImportResult) ([]Trade, []CashOperation, error) {
+	accountPrefix := scope.AccountKey + ":"
+	openingPrefix := scope.AccountKey + OpeningMarker
+
+	const delTrades = `
+		DELETE FROM trades
+		WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND executed_at > $3`
+	if _, err := tx.ExecContext(ctx, delTrades, portfolioID, openingPrefix, scope.PeriodStart); err != nil {
+		return nil, nil, fmt.Errorf("delete superseded opening trades: %w", err)
+	}
+	const delCash = `
+		DELETE FROM cash_operations
+		WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND occurred_at > $3`
+	if _, err := tx.ExecContext(ctx, delCash, portfolioID, openingPrefix, scope.PeriodStart); err != nil {
+		return nil, nil, fmt.Errorf("delete superseded opening cash operations: %w", err)
+	}
+
+	const earlier = `
+		SELECT EXISTS (
+			SELECT 1 FROM trades
+			WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND executed_at < $3
+		) OR EXISTS (
+			SELECT 1 FROM cash_operations
+			WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND occurred_at < $3
+		)`
+	var hasEarlier bool
+	if err := tx.QueryRowContext(ctx, earlier, portfolioID, accountPrefix, scope.PeriodStart).Scan(&hasEarlier); err != nil {
+		return nil, nil, fmt.Errorf("check earlier history: %w", err)
+	}
+	if !hasEarlier {
+		return trades, cash, nil
+	}
+
+	keptTrades := trades[:0:0]
+	for _, t := range trades {
+		if strings.HasPrefix(t.ExternalID, openingPrefix) {
+			res.TradesSkipped++
+			continue
+		}
+		keptTrades = append(keptTrades, t)
+	}
+	keptCash := cash[:0:0]
+	for _, c := range cash {
+		if strings.HasPrefix(c.ExternalID, openingPrefix) {
+			res.CashSkipped++
+			continue
+		}
+		keptCash = append(keptCash, c)
+	}
+	return keptTrades, keptCash, nil
+}
+
+// ensureSecurities заводит в справочнике securities бумаги из отчёта,
+// которых там нет (фонд торгуется не в том режиме, что грузит price_updater,
+// бумага снята с торгов…): иначе FK trades → securities отклонит весь отчёт.
+// Существующие строки не трогает; цены у новой бумаги не будет, пока её
+// не обновит price_updater.
+func ensureSecurities(ctx context.Context, tx *sql.Tx, trades []Trade) error {
+	const stmt = `
+		INSERT INTO securities (secid, board, short_name, sec_name, isin, currency, price_in_percent)
+		VALUES ($1, $2, NULLIF($3, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6)
+		ON CONFLICT (secid, board) DO NOTHING`
+	seen := map[string]bool{}
+	for _, t := range trades {
+		key := t.SecID + "/" + t.Board
+		if t.SecurityName == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		currency := t.Currency
+		if currency == "RUB" {
+			currency = "SUR" // как в справочнике MOEX
+		}
+		bond := t.Board == "TQOB" || t.Board == "TQCB"
+		if _, err := tx.ExecContext(ctx, stmt, t.SecID, t.Board, t.SecurityName, t.ISIN, currency, bond); err != nil {
+			return fmt.Errorf("ensure security %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, trades []Trade, cash []CashOperation, opening *OpeningScope) (ImportResult, error) {
 	var res ImportResult
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -365,6 +469,17 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, 
 			_ = tx.Rollback()
 		}
 	}()
+
+	if err := ensureSecurities(ctx, tx, trades); err != nil {
+		return ImportResult{}, err
+	}
+
+	if opening != nil {
+		trades, cash, err = applyOpening(ctx, tx, portfolioID, *opening, trades, cash, &res)
+		if err != nil {
+			return ImportResult{}, err
+		}
+	}
 
 	const tradeStmt = `
 		INSERT INTO trades (portfolio_id, secid, board, side, quantity, price, fee, currency, executed_at, accrued_interest, external_id)

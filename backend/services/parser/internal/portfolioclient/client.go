@@ -42,8 +42,12 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID
 	req := &portfoliopb.ImportReportRequest{
 		PortfolioId:    portfolioID,
 		ReportImportId: importID,
+		AccountKey:     r.AccountKey,
 		Trades:         make([]*portfoliopb.TradeInput, 0, len(r.Trades)),
 		CashOperations: make([]*portfoliopb.CashOperationInput, 0, len(r.CashOperations)),
+	}
+	if r.PeriodStart != nil {
+		req.PeriodStart = timestamppb.New(*r.PeriodStart)
 	}
 	for _, t := range r.Trades {
 		in := &portfoliopb.TradeInput{
@@ -56,6 +60,8 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID
 			Currency:        t.Currency,
 			AccruedInterest: t.AccruedInterest,
 			ExternalId:      t.ExternalID,
+			SecurityName:    t.SecurityName,
+			Isin:            t.ISIN,
 		}
 		if t.ExecutedAt != nil {
 			in.ExecutedAt = timestamppb.New(*t.ExecutedAt)

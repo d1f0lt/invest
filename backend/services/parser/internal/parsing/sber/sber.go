@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +63,10 @@ var (
 	headTrades    = normKey("Сделки купли/продажи ценных бумаг")
 	headCash      = normKey("Движение денежных средств за период")
 	headSecurites = normKey("Справочник Ценных Бумаг")
+	headPayouts   = normKey("Выплаты дохода от эмитента на внешний счет")
 	headTitle     = normKey("Отчет брокера")
+	headHoldings  = normKey("Портфель Ценных Бумаг")
+	headCashBal   = normKey("Денежные средства")
 )
 
 
@@ -89,7 +93,32 @@ func Parse(data []byte) (parsing.Report, error) {
 	if err != nil {
 		return parsing.Report{}, err
 	}
-	return parsing.Report{Trades: trades, CashOperations: cash}, nil
+	payouts, err := parseExternalPayouts(d.sections[headPayouts], ref, d.account)
+	if err != nil {
+		return parsing.Report{}, err
+	}
+	cash = append(cash, payouts...)
+
+	report := parsing.Report{Trades: trades, CashOperations: cash}
+	if d.account != "" {
+		report.AccountKey = "sber:" + d.account
+	}
+	if d.periodStart != nil && report.AccountKey != "" {
+		report.PeriodStart = d.periodStart
+		var holdings [][]row
+		for key, tables := range d.sections {
+			if strings.HasPrefix(key, headHoldings) {
+				holdings = append(holdings, tables...)
+			}
+		}
+		oTrades, oCash, err := parseOpening(holdings, d.sections[headCashBal], ref, report.AccountKey, *d.periodStart)
+		if err != nil {
+			return parsing.Report{}, err
+		}
+		report.Trades = append(report.Trades, oTrades...)
+		report.CashOperations = append(report.CashOperations, oCash...)
+	}
+	return report, nil
 }
 
 
@@ -103,12 +132,16 @@ type row struct {
 type document struct {
 	hasTitle bool
 	account  string 
+	// Начало периода из заголовка «Отчет брокера за период с … по …».
+	periodStart *time.Time
 	
 	
 	sections map[string][][]row
 }
 
 var reAccountInTitle = regexp.MustCompile(`(?i)отчет брокера\s+(\S+)`)
+
+var rePeriod = regexp.MustCompile(`(?i)за период с\s+(\d{2}\.\d{2}\.\d{4})\s+по\s+(\d{2}\.\d{2}\.\d{4})`)
 
 func collect(root *html.Node) document {
 	d := document{sections: map[string][][]row{}}
@@ -125,6 +158,16 @@ func collect(root *html.Node) document {
 					if m := reAccountInTitle.FindStringSubmatch(t); m != nil {
 						d.account = m[1]
 					}
+				}
+				return
+			case "h1", "h2", "h3":
+				if m := rePeriod.FindStringSubmatch(collapse(textOf(n))); m != nil && d.periodStart == nil {
+					if t, err := parseDate(m[1]); err == nil {
+						d.periodStart = &t
+					}
+				}
+				if strings.HasPrefix(normKey(textOf(n)), headTitle) {
+					d.hasTitle = true
 				}
 				return
 			case "p":
@@ -460,6 +503,8 @@ func parseTradeRow(cols columns, r row, ref *reference, account string) (parsing
 		Currency:        strings.ToUpper(cols.get(r, "Валюта")),
 		ExecutedAt:      &executedAt,
 		ExternalID:      "sber:" + account + ":trade:" + dealNo,
+		SecurityName:    sec.Name,
+		ISIN:            sec.ISIN,
 	}, nil
 }
 
@@ -534,6 +579,252 @@ func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOp
 
 
 
+
+// parseExternalPayouts разбирает «Выплаты дохода от эмитента на внешний счет»:
+// дивиденды/купоны, которые эмитент перечислил сразу на банковский счёт, минуя
+// брокерский. Это доход портфеля, но на брокерский счёт деньги не приходили,
+// поэтому каждая выплата даёт пару операций: доход (+) и вывод (−) на ту же
+// сумму. Так P&L видит доход, а остаток денег на счёте не меняется.
+func parseExternalPayouts(tables [][]row, ref *reference, account string) ([]parsing.CashOperation, error) {
+	var out []parsing.CashOperation
+	seen := map[string]int{}
+	for _, rows := range tables {
+		cols, ok := headerOf(rows)
+		if !ok {
+			continue
+		}
+		if err := cols.require("Дата", "Описание операции", "Валюта", "Сумма"); err != nil {
+			return nil, err
+		}
+		for _, r := range dataRows(rows, len(cols)) {
+			desc := cols.get(r, "Описание операции")
+			date, err := parseDate(cols.get(r, "Дата"))
+			if err != nil {
+				return nil, fmt.Errorf("sber: external payout %q: %w", desc, err)
+			}
+			amount, err := parseNumber(cols.get(r, "Сумма"))
+			if err != nil {
+				return nil, fmt.Errorf("sber: external payout %q: %w", desc, err)
+			}
+			amount = round(amount, 2)
+			if amount <= 0 {
+				continue
+			}
+			typ, _ := classify(desc, amount)
+			switch typ {
+			case parsing.CashDividend, parsing.CashCoupon, parsing.CashRedemption:
+			default:
+				typ = parsing.CashOther
+			}
+			currency := strings.ToUpper(cols.get(r, "Валюта"))
+
+			key := strings.Join([]string{account, date.Format("2006-01-02"), currency, desc, strconv.FormatFloat(amount, 'f', 2, 64)}, "|")
+			n := seen[key]
+			seen[key]++
+			id := func(tag string) string {
+				sum := sha1.Sum([]byte(fmt.Sprintf("%s|%s#%d", tag, key, n)))
+				return "sber:" + account + ":" + tag + ":" + hex.EncodeToString(sum[:12])
+			}
+
+			income := parsing.CashOperation{
+				Type:        typ,
+				Amount:      amount,
+				Currency:    currency,
+				Date:        date,
+				Description: desc + " (на внешний счёт)",
+				ExternalID:  id("payout"),
+			}
+			if sec := ref.findInText(desc); sec != nil {
+				income.SecID, income.Board = sec.Code, sec.Board
+			}
+			out = append(out, income, parsing.CashOperation{
+				Type:        parsing.CashWithdrawal,
+				Amount:      -amount,
+				Currency:    currency,
+				Date:        date,
+				Description: "Выплата на внешний счёт: " + desc,
+				ExternalID:  id("payout-out"),
+			})
+		}
+	}
+	return out, nil
+}
+
+// parseOpening превращает «Портфель Ценных Бумаг» (колонки «Начало периода»)
+// и «Денежные средства» (остаток на начало) во вводный остаток:
+//   - каждая бумага → покупка по рыночной стоимости на начало периода
+//     (себестоимости в отчёте нет), НКД — как при обычной покупке;
+//   - стоимость всех бумаг → одно пополнение ":securities" (деньги, которыми
+//     эти бумаги «оплачены», чтобы остаток денег не ушёл в минус);
+//   - деньги на начало периода → пополнение ":cash:<валюта>".
+//
+// Время — начало периода (00:00 МСК). Если на начало периода счёт пуст,
+// ничего не возвращает.
+func parseOpening(holdings, cashTables [][]row, ref *reference, accountKey string, start time.Time) ([]parsing.Trade, []parsing.CashOperation, error) {
+	prefix := accountKey + parsing.OpeningMarker + start.Format("2006-01-02") + ":"
+	dateText := start.Format("02.01.2006")
+
+	var trades []parsing.Trade
+	costs := map[string]float64{}
+	for _, rows := range holdings {
+		hdr, ok := namedHeader(rows, "Наименование")
+		if !ok {
+			continue
+		}
+		idx := firstIndexes(hdr.cells)
+		for _, name := range []string{"Наименование", "ISIN ценной бумаги", "Валюта рыночной цены", "Количество, шт", "Рыночная стоимость, без НКД", "НКД"} {
+			if _, ok := idx[normKey(name)]; !ok {
+				return nil, nil, fmt.Errorf("sber: securities portfolio table layout changed, missing column %q", name)
+			}
+		}
+		get := func(r row, name string) string {
+			i := idx[normKey(name)]
+			if i >= len(r.cells) {
+				return ""
+			}
+			return r.cells[i]
+		}
+		for _, r := range rows {
+			if r.header || len(r.cells) != len(hdr.cells) {
+				continue
+			}
+			name, isin := get(r, "Наименование"), strings.ToUpper(get(r, "ISIN ценной бумаги"))
+			if name == "" || isin == "" || isColumnNumber(name) {
+				continue
+			}
+			qty, err := parseNumber(get(r, "Количество, шт"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			if qty <= 0 {
+				continue
+			}
+			value, err := parseNumber(get(r, "Рыночная стоимость, без НКД"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			accrued, err := parseNumber(get(r, "НКД"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			sec, err := ref.lookup(isin, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			currency := strings.ToUpper(get(r, "Валюта рыночной цены"))
+			if currency == "" {
+				currency = "RUB"
+			}
+			at := start
+			trades = append(trades, parsing.Trade{
+				SecID:           sec.Code,
+				Board:           sec.Board,
+				Side:            "buy",
+				Quantity:        qty,
+				Price:           round(value/qty, 6),
+				AccruedInterest: round(accrued, 2),
+				Currency:        currency,
+				ExecutedAt:      &at,
+				ExternalID:      prefix + "position:" + isin,
+				SecurityName:    sec.Name,
+				ISIN:            sec.ISIN,
+			})
+			costs[currency] += value + accrued
+		}
+	}
+
+	var cash []parsing.CashOperation
+	for _, currency := range sortedKeys(costs) {
+		amount := round(costs[currency], 2)
+		if amount <= 0 {
+			continue
+		}
+		cash = append(cash, parsing.CashOperation{
+			Type:        parsing.CashDeposit,
+			Amount:      amount,
+			Currency:    currency,
+			Date:        start,
+			Description: "Вводный остаток: бумаги на " + dateText,
+			ExternalID:  prefix + "securities:" + currency,
+		})
+	}
+
+	balances := map[string]float64{}
+	for _, rows := range cashTables {
+		hdr, ok := namedHeader(rows, "Торговая площадка")
+		if !ok {
+			continue
+		}
+		idx := firstIndexes(hdr.cells)
+		ci, okC := idx[normKey("Валюта")]
+		si, okS := idx[normKey("Начало периода")]
+		if !okC || !okS {
+			return nil, nil, fmt.Errorf("sber: cash balance table layout changed")
+		}
+		for _, r := range rows {
+			if r.header || len(r.cells) != len(hdr.cells) || !strings.HasPrefix(strings.ToLower(r.cells[0]), "торговый счет") {
+				continue
+			}
+			v, err := parseNumber(r.cells[si])
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening cash: %w", err)
+			}
+			balances[strings.ToUpper(r.cells[ci])] += v
+		}
+	}
+	for _, currency := range sortedKeys(balances) {
+		amount := round(balances[currency], 2)
+		if amount == 0 {
+			continue
+		}
+		typ := parsing.CashDeposit
+		if amount < 0 {
+			typ = parsing.CashWithdrawal
+		}
+		cash = append(cash, parsing.CashOperation{
+			Type:        typ,
+			Amount:      amount,
+			Currency:    currency,
+			Date:        start,
+			Description: "Вводный остаток: деньги на " + dateText,
+			ExternalID:  prefix + "cash:" + currency,
+		})
+	}
+	return trades, cash, nil
+}
+
+// namedHeader — строка-заголовок таблицы, где первая ячейка = first
+// (у «Портфеля Ценных Бумаг» над ней есть ещё строка групп колонок).
+func namedHeader(rows []row, first string) (row, bool) {
+	for _, r := range rows {
+		if r.header && len(r.cells) > 0 && normKey(r.cells[0]) == normKey(first) {
+			return r, true
+		}
+	}
+	return row{}, false
+}
+
+// firstIndexes — индекс первой колонки с таким названием (названия
+// повторяются: «Количество, шт» есть у начала и у конца периода).
+func firstIndexes(cells []string) map[string]int {
+	idx := map[string]int{}
+	for i, c := range cells {
+		k := normKey(c)
+		if _, ok := idx[k]; !ok {
+			idx[k] = i
+		}
+	}
+	return idx
+}
+
+func sortedKeys(m map[string]float64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 func classify(desc string, amount float64) (typ string, skip bool) {
 	d := strings.ToLower(desc)

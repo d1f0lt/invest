@@ -31,6 +31,10 @@ class PortfolioStore extends ChangeNotifier {
   /// Сводка ещё грузится (или не загрузилась) — отличаем от «портфель пуст».
   bool statsLoading = false;
 
+  /// Растёт после каждой перезагрузки сводки (в т.ч. после загрузки отчёта) —
+  /// по нему вкладка «Операции» понимает, что пора перечитать данные.
+  int revision = 0;
+
   Future<void> load() async {
     if (loading) return;
     loading = true;
@@ -73,6 +77,7 @@ class PortfolioStore extends ChangeNotifier {
         if (e != null) e.key: e.value,
     };
     statsLoading = false;
+    revision++;
     notifyListeners();
   }
 
