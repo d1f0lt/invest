@@ -17,7 +17,6 @@ import (
 	"invest/backend/services/gateway/internal/upstream"
 )
 
-
 type renameClient struct {
 	portfoliopb.PortfolioServiceClient
 	got *portfoliopb.UpdatePortfolioRequest

@@ -40,8 +40,6 @@ func (s *Server) ListBrokers(ctx context.Context, _ *emptypb.Empty) (*portfoliop
 	return &portfoliopb.ListBrokersResponse{Brokers: out}, nil
 }
 
-
-
 func (s *Server) CreateReportImport(ctx context.Context, req *portfoliopb.CreateReportImportRequest) (*portfoliopb.ReportImport, error) {
 	id := strings.TrimSpace(req.GetId())
 	if !uuidRE.MatchString(id) {
@@ -111,7 +109,6 @@ func (s *Server) ListReportImports(ctx context.Context, req *portfoliopb.ListRep
 
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-
 const maxImportErrorLen = 1000
 
 func (s *Server) UpdateReportImportStatus(ctx context.Context, req *portfoliopb.UpdateReportImportStatusRequest) (*portfoliopb.ReportImport, error) {
@@ -149,8 +146,6 @@ func (s *Server) UpdateReportImportStatus(ctx context.Context, req *portfoliopb.
 	return toReportImportPB(r), nil
 }
 
-
-
 func (s *Server) loadOwnedReportImport(ctx context.Context, id string) (storage.ReportImport, error) {
 	if _, err := authmd.UserID(ctx); err != nil {
 		return storage.ReportImport{}, err
@@ -171,8 +166,6 @@ func (s *Server) loadOwnedReportImport(ctx context.Context, id string) (storage.
 	}
 	return r, nil
 }
-
-
 
 func acceptsFile(formats []string, filename string) bool {
 	ext := strings.ToLower(strings.TrimPrefix(path.Ext(filename), "."))

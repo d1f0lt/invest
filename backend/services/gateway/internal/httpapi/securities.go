@@ -8,9 +8,6 @@ import (
 	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 )
 
-
-
-
 func (h *Handlers) handleSearchSecurities(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {

@@ -10,21 +10,12 @@ import (
 )
 
 type HistoryConfig struct {
-	
 	RunAtHour, RunAtMinute int
-	
-	
+
 	BackfillDays int
-	
-	
+
 	RequestPause time.Duration
 }
-
-
-
-
-
-
 
 type HistoryJob struct {
 	client MoexClient
@@ -146,9 +137,6 @@ func (j *HistoryJob) syncBoard(ctx context.Context, board string, today time.Tim
 			return err
 		}
 
-		
-		
-		
 		if len(daily) == 0 && d.Equal(yesterday) {
 			j.log.Warn("no history yet for yesterday, will retry next run", "board", board, "date", d.Format("2006-01-02"))
 			break
@@ -179,13 +167,10 @@ func (j *HistoryJob) syncBoard(ctx context.Context, board string, today time.Tim
 	return nil
 }
 
-
-
 func dateOf(t time.Time, loc *time.Location) time.Time {
 	l := t.In(loc)
 	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, time.UTC)
 }
-
 
 func nextDailyRun(now time.Time, loc *time.Location, hour, minute int) time.Time {
 	l := now.In(loc)

@@ -42,7 +42,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid POLL_INTERVAL: %w", err)
 	}
 	if pollInterval <= 0 {
-		
+
 		return Config{}, fmt.Errorf("POLL_INTERVAL must be positive, got %s", pollInterval)
 	}
 	cfg.PollInterval = pollInterval
@@ -80,7 +80,6 @@ func Load() (Config, error) {
 
 	return cfg, nil
 }
-
 
 func parseClock(s string) (int, int, error) {
 	t, err := time.Parse("15:04", strings.TrimSpace(s))

@@ -1,19 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 package health
 
 import (
@@ -25,21 +9,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-
-
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
-
-
 
 type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
 	Queue Pinger
 	Store Pinger
-	
-	
-	
+
 	OnUnhealthy func(error)
 }
 

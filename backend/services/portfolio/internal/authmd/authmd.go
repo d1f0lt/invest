@@ -1,14 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
 package authmd
 
 import (
@@ -20,18 +9,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-
-
-
 const UserIDKey = "x-user-id"
 
-
-
 var ErrMissing = errors.New("missing " + UserIDKey + " metadata")
-
-
-
-
 
 func UserID(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)

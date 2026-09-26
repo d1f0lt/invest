@@ -101,9 +101,6 @@ type PriceRow struct {
 	PrevClose      *float64
 }
 
-
-
-
 func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
@@ -195,19 +192,11 @@ type Candle struct {
 	Value    *float64
 }
 
-
-
 type CandleMode int
 
 const (
-	
-	
-	
-	
 	CandleExtend CandleMode = iota
-	
-	
-	
+
 	CandleReplace
 )
 
@@ -270,8 +259,6 @@ func (s *Store) UpsertCandles(ctx context.Context, candles []Candle, mode Candle
 	return n, nil
 }
 
-
-
 func (s *Store) HistorySyncedThrough(ctx context.Context, board string) (time.Time, bool, error) {
 	var d time.Time
 	err := s.db.QueryRowContext(ctx, `SELECT synced_through FROM candle_history_sync WHERE board = $1`, board).Scan(&d)
@@ -295,10 +282,6 @@ func (s *Store) SetHistorySyncedThrough(ctx context.Context, board string, date 
 	}
 	return nil
 }
-
-
-
-
 
 func (s *Store) PruneHourlyCandles(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `

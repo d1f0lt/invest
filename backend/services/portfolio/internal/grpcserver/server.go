@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 package grpcserver
 
 import (
@@ -27,9 +19,6 @@ import (
 	portfoliopb "invest/backend/services/portfolio/proto"
 )
 
-
-
-
 type Store interface {
 	CreatePortfolio(ctx context.Context, userID, name string) (storage.Portfolio, error)
 	ListPortfoliosByUser(ctx context.Context, userID string) ([]storage.Portfolio, error)
@@ -41,6 +30,8 @@ type Store interface {
 	ImportReport(ctx context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, opening *storage.OpeningScope) (storage.ImportResult, error)
 	ListCashOperations(ctx context.Context, portfolioID string) ([]storage.CashOperation, error)
 	LatestPrices(ctx context.Context, instruments [][2]string) (map[string]float64, error)
+	PrevCloses(ctx context.Context, instruments [][2]string) (map[string]float64, error)
+	DailyCloses(ctx context.Context, instruments [][2]string, from time.Time) (map[string][]storage.DailyClose, error)
 
 	ListBrokers(ctx context.Context) ([]storage.Broker, error)
 	GetBroker(ctx context.Context, id string) (storage.Broker, error)
@@ -50,12 +41,14 @@ type Store interface {
 	UpdateReportImportStatus(ctx context.Context, id, status, errMsg string) (storage.ReportImport, error)
 }
 
-
 type Server struct {
 	portfoliopb.UnimplementedPortfolioServiceServer
 
 	Store Store
 	Log   *slog.Logger
+
+	Loc *time.Location
+	Now func() time.Time
 }
 
 func (s *Server) CreatePortfolio(ctx context.Context, req *portfoliopb.CreatePortfolioRequest) (*portfoliopb.Portfolio, error) {
@@ -103,7 +96,6 @@ func (s *Server) GetPortfolio(ctx context.Context, req *portfoliopb.GetPortfolio
 	return toPortfolioPB(p), nil
 }
 
-
 const maxPortfolioNameLen = 100
 
 func (s *Server) UpdatePortfolio(ctx context.Context, req *portfoliopb.UpdatePortfolioRequest) (*portfoliopb.Portfolio, error) {
@@ -136,7 +128,6 @@ func (s *Server) CreateTrade(ctx context.Context, req *portfoliopb.CreateTradeRe
 		return nil, err
 	}
 
-	
 	t, err := s.validateTrade(&portfoliopb.TradeInput{
 		Secid:      req.GetSecid(),
 		Board:      req.GetBoard(),
@@ -154,16 +145,11 @@ func (s *Server) CreateTrade(ctx context.Context, req *portfoliopb.CreateTradeRe
 
 	trade, err := s.Store.CreateTrade(ctx, t)
 	if err != nil {
-		
-		
-		
+
 		return nil, s.insertError("create trade", err)
 	}
 	return toTradePB(trade), nil
 }
-
-
-
 
 func (s *Server) validateTrade(t *portfoliopb.TradeInput) (storage.Trade, error) {
 	side := strings.ToLower(strings.TrimSpace(t.GetSide()))
@@ -204,13 +190,6 @@ func (s *Server) validateTrade(t *portfoliopb.TradeInput) (storage.Trade, error)
 	}, nil
 }
 
-
-
-
-
-
-
-
 func (s *Server) CreateTrades(ctx context.Context, req *portfoliopb.CreateTradesRequest) (*portfoliopb.CreateTradesResponse, error) {
 	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
@@ -234,8 +213,7 @@ func (s *Server) CreateTrades(ctx context.Context, req *portfoliopb.CreateTrades
 
 	created, err := s.Store.CreateTradesBatch(ctx, stored)
 	if err != nil {
-		
-		
+
 		return nil, s.insertError("create trades batch", err)
 	}
 
@@ -298,13 +276,9 @@ func (s *Server) GetPnL(ctx context.Context, req *portfoliopb.GetPnLRequest) (*p
 		TotalOther:           summary.TotalOther,
 		NetDeposits:          summary.NetDeposits,
 		CashBalance:          summary.CashBalance,
+		TotalDayChange:       summary.TotalDayChange,
 	}, nil
 }
-
-
-
-
-
 
 func (s *Server) loadOwnedPortfolio(ctx context.Context, id string) (storage.Portfolio, error) {
 	userID, err := authmd.UserID(ctx)
@@ -323,35 +297,42 @@ func (s *Server) loadOwnedPortfolio(ctx context.Context, id string) (storage.Por
 	return p, nil
 }
 
-func (s *Server) computePnL(ctx context.Context, portfolioID string) (pnl.Summary, error) {
+type ledger struct {
+	trades      []pnl.Trade
+	cash        []pnl.CashFlow
+	instruments [][2]string
+	prices      map[string]float64
+}
+
+func (s *Server) loadLedger(ctx context.Context, portfolioID string) (ledger, error) {
 	p, err := s.loadOwnedPortfolio(ctx, portfolioID)
 	if err != nil {
-		return pnl.Summary{}, err
+		return ledger{}, err
 	}
 
 	storedTrades, err := s.Store.ListTrades(ctx, p.ID)
 	if err != nil {
 		s.Log.Error("list trades", "error", err)
-		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
+		return ledger{}, status.Error(codes.Internal, "internal error")
 	}
 
 	storedCash, err := s.Store.ListCashOperations(ctx, p.ID)
 	if err != nil {
 		s.Log.Error("list cash operations", "error", err)
-		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
+		return ledger{}, status.Error(codes.Internal, "internal error")
 	}
-	cash := make([]pnl.CashFlow, 0, len(storedCash))
+	var l ledger
+	l.cash = make([]pnl.CashFlow, 0, len(storedCash))
 	for _, c := range storedCash {
-		cash = append(cash, pnl.CashFlow{
+		l.cash = append(l.cash, pnl.CashFlow{
 			Type: c.Type, Amount: c.Amount, SecID: c.SecID, Board: c.Board, OccurredAt: c.OccurredAt,
 		})
 	}
 
-	trades := make([]pnl.Trade, 0, len(storedTrades))
+	l.trades = make([]pnl.Trade, 0, len(storedTrades))
 	seen := map[[2]string]bool{}
-	var instruments [][2]string
 	for _, t := range storedTrades {
-		trades = append(trades, pnl.Trade{
+		l.trades = append(l.trades, pnl.Trade{
 			SecID: t.SecID, Board: t.Board, Side: pnl.TradeSide(t.Side),
 			Quantity: t.Quantity, Price: t.Price, Fee: t.Fee, ExecutedAt: t.ExecutedAt,
 			AccruedInterest: t.AccruedInterest,
@@ -359,17 +340,32 @@ func (s *Server) computePnL(ctx context.Context, portfolioID string) (pnl.Summar
 		key := [2]string{t.SecID, t.Board}
 		if !seen[key] {
 			seen[key] = true
-			instruments = append(instruments, key)
+			l.instruments = append(l.instruments, key)
 		}
 	}
 
-	prices, err := s.Store.LatestPrices(ctx, instruments)
+	l.prices, err = s.Store.LatestPrices(ctx, l.instruments)
 	if err != nil {
 		s.Log.Error("latest prices", "error", err)
+		return ledger{}, status.Error(codes.Internal, "internal error")
+	}
+	return l, nil
+}
+
+func (s *Server) computePnL(ctx context.Context, portfolioID string) (pnl.Summary, error) {
+	l, err := s.loadLedger(ctx, portfolioID)
+	if err != nil {
+		return pnl.Summary{}, err
+	}
+	summary := pnl.Compute(l.trades, l.cash, l.prices)
+
+	prevCloses, err := s.Store.PrevCloses(ctx, l.instruments)
+	if err != nil {
+		s.Log.Error("prev closes", "error", err)
 		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
 	}
-
-	return pnl.Compute(trades, cash, prices), nil
+	pnl.ApplyDayChange(&summary, prevCloses)
+	return summary, nil
 }
 
 func toPortfolioPB(p storage.Portfolio) *portfoliopb.Portfolio {
@@ -421,6 +417,7 @@ func toHoldingPB(i pnl.InstrumentPnL) *portfoliopb.Holding {
 		CurrentPrice:  i.CurrentPrice,
 		MarketValue:   i.MarketValue,
 		UnrealizedPnl: i.UnrealizedPnL,
+		DayChange:     i.DayChange,
 	}
 }
 
@@ -434,10 +431,6 @@ func toInstrumentPB(i pnl.InstrumentPnL) *portfoliopb.InstrumentPnL {
 		AccruedInterest: i.AccruedInterest,
 	}
 }
-
-
-
-
 
 func (s *Server) insertError(op string, err error) error {
 	switch {
@@ -482,8 +475,6 @@ func validateCashOperation(c *portfoliopb.CashOperationInput) (storage.CashOpera
 	}, nil
 }
 
-
-
 func (s *Server) ImportReport(ctx context.Context, req *portfoliopb.ImportReportRequest) (*portfoliopb.ImportReportResponse, error) {
 	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
@@ -514,8 +505,7 @@ func (s *Server) ImportReport(ctx context.Context, req *portfoliopb.ImportReport
 
 	importID := strings.TrimSpace(req.GetReportImportId())
 	if importID != "" {
-		
-		
+
 		imp, err := s.Store.GetReportImport(ctx, importID)
 		if errors.Is(err, storage.ErrNotFound) || (err == nil && imp.PortfolioID != p.ID) {
 			return nil, status.Error(codes.NotFound, "report import not found")

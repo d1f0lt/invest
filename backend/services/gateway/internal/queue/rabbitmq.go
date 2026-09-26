@@ -13,25 +13,13 @@ import (
 	"invest/backend/services/gateway/internal/task"
 )
 
-
-
 const confirmTimeout = 10 * time.Second
-
-
-
-
-
-
-
-
-
-
 
 type Publisher struct {
 	url   string
 	queue string
 
-	mu      sync.Mutex 
+	mu      sync.Mutex
 	conn    *amqp.Connection
 	channel *amqp.Channel
 	closed  bool
@@ -44,8 +32,6 @@ func Connect(url, queueName string) (*Publisher, error) {
 	}
 	return p, nil
 }
-
-
 
 func (p *Publisher) connectLocked() error {
 	p.resetLocked()
@@ -75,8 +61,6 @@ func (p *Publisher) connectLocked() error {
 	return nil
 }
 
-
-
 func (p *Publisher) ensureLocked() error {
 	if p.closed {
 		return errors.New("publisher is closed")
@@ -86,7 +70,6 @@ func (p *Publisher) ensureLocked() error {
 	}
 	return p.connectLocked()
 }
-
 
 func (p *Publisher) resetLocked() {
 	if p.conn != nil {
@@ -123,8 +106,7 @@ func (p *Publisher) Publish(ctx context.Context, t task.ReportUploaded) error {
 
 	acked, err := dc.WaitContext(ctx)
 	if err != nil {
-		
-		
+
 		p.resetLocked()
 		return fmt.Errorf("wait for publisher confirm: %w", err)
 	}
@@ -133,8 +115,6 @@ func (p *Publisher) Publish(ctx context.Context, t task.ReportUploaded) error {
 	}
 	return nil
 }
-
-
 
 func (p *Publisher) Ping(_ context.Context) error {
 	p.mu.Lock()

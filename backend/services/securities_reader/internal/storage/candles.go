@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-
 const (
 	IntervalHour = "1h"
 	IntervalDay  = "1d"
@@ -23,7 +22,6 @@ type Candle struct {
 	Volume *int64
 	Value  *float64
 }
-
 
 func (s *Store) BoardsOf(ctx context.Context, secid string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT board FROM securities WHERE secid = $1 ORDER BY board`, secid)
@@ -42,7 +40,6 @@ func (s *Store) BoardsOf(ctx context.Context, secid string) ([]string, error) {
 	return out, rows.Err()
 }
 
-
 func (s *Store) LatestCandleStart(ctx context.Context, secid, board, interval string) (time.Time, bool, error) {
 	var t time.Time
 	err := s.db.QueryRowContext(ctx, `
@@ -59,8 +56,6 @@ func (s *Store) LatestCandleStart(ctx context.Context, secid, board, interval st
 	return t, true, nil
 }
 
-
-
 func (s *Store) Candles(ctx context.Context, secid, board, interval string, from time.Time) ([]Candle, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT start_at, open, high, low, close, volume, value
@@ -74,8 +69,6 @@ func (s *Store) Candles(ctx context.Context, secid, board, interval string, from
 	defer rows.Close()
 	return scanCandles(rows)
 }
-
-
 
 func (s *Store) WeeklyCandles(ctx context.Context, secid, board string) ([]Candle, error) {
 	rows, err := s.db.QueryContext(ctx, `

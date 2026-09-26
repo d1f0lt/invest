@@ -1,8 +1,3 @@
-
-
-
-
-
 package main
 
 import (
@@ -62,9 +57,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	
-	
-	
 	grpcServer := grpc.NewServer()
 
 	portfoliopb.RegisterPortfolioServiceServer(grpcServer, &grpcserver.Server{
@@ -74,8 +66,7 @@ func main() {
 	grpc_health_v1.RegisterHealthServer(grpcServer, &health.Server{
 		Probe: func(ctx context.Context) error { return store.Ping(ctx) },
 	})
-	
-	
+
 	reflection.Register(grpcServer)
 
 	go func() {
@@ -91,9 +82,6 @@ func main() {
 	}
 	log.Info("portfolio service stopped")
 }
-
-
-
 
 func runHealthcheckClient(addr string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

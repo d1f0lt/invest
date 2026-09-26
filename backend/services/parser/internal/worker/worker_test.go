@@ -35,8 +35,6 @@ func TestIsPermanent(t *testing.T) {
 	}
 }
 
-
-
 type fakeAck struct{ acked, nacked, requeued bool }
 
 func (f *fakeAck) Ack(uint64, bool) error { f.acked = true; return nil }
@@ -67,7 +65,7 @@ func (f fakeParser) Parse(task.ReportUploaded, []byte) (parsing.Report, error) {
 type statusCall struct{ id, status, message string }
 
 type fakePortfolio struct {
-	statusErr error 
+	statusErr error
 	importErr error
 
 	statuses []statusCall

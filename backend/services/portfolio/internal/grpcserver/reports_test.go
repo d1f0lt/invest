@@ -114,7 +114,6 @@ func TestCreateReportImport_Validation(t *testing.T) {
 		}
 	}
 
-	
 	_, err := srv.CreateReportImport(withUserID("u2"), &portfoliopb.CreateReportImportRequest{
 		Id: "7f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e55", PortfolioId: p.GetId(), BrokerId: "sber", Filename: "r.html",
 	})
@@ -138,7 +137,6 @@ func TestReportImport_Lifecycle(t *testing.T) {
 		t.Fatalf("status = %q, want queued", created.GetStatus())
 	}
 
-	
 	if _, err := srv.GetReportImport(withUserID("u2"), &portfoliopb.GetReportImportRequest{Id: importID}); status.Code(err) != codes.NotFound {
 		t.Errorf("foreign get: %v, want NotFound", err)
 	}
@@ -153,7 +151,6 @@ func TestReportImport_Lifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	
 	req := importReq(p.GetId())
 	req.ReportImportId = importID
 	res, err := srv.ImportReport(ctx, req)
@@ -168,7 +165,6 @@ func TestReportImport_Lifecycle(t *testing.T) {
 		t.Errorf("after import: %v, want done with %v", got, res)
 	}
 
-	
 	if _, err := srv.UpdateReportImportStatus(ctx, &portfoliopb.UpdateReportImportStatusRequest{Id: importID, Status: "failed"}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("update finished: %v, want FailedPrecondition", err)
 	}

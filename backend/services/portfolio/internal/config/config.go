@@ -8,10 +8,6 @@ import (
 type Config struct {
 	DatabaseURL string
 
-	
-	
-	
-	
 	GRPCAddr string
 
 	LogLevel string

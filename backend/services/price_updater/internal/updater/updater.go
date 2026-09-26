@@ -23,10 +23,6 @@ type Storage interface {
 	PruneHourlyCandles(ctx context.Context) (int64, error)
 }
 
-
-
-
-
 type Updater struct {
 	client MoexClient
 	store  Storage
@@ -119,16 +115,6 @@ func (u *Updater) syncBoard(ctx context.Context, board string, collectedAt time.
 }
 
 const tradingStatusTrading = "T"
-
-
-
-
-
-
-
-
-
-
 
 func buildRows(board string, quotes map[string]moexclient.MarketQuote, collectedAt time.Time, loc *time.Location) (prices []storage.PriceRow, hourly, daily []storage.Candle) {
 	local := collectedAt.In(loc)

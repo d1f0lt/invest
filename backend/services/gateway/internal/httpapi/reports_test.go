@@ -20,8 +20,6 @@ import (
 	"invest/backend/services/gateway/internal/task"
 )
 
-
-
 type fakeReportStore struct {
 	uploaded     map[string][]byte
 	uploadedType map[string]string
@@ -29,9 +27,7 @@ type fakeReportStore struct {
 
 	removedKeys []string
 	removeErr   error
-	
-	
-	
+
 	orphaned bool
 }
 
@@ -69,8 +65,7 @@ func (f *fakeReportStore) Remove(ctx context.Context, bucket, key string) error 
 type fakeReportQueue struct {
 	published []task.ReportUploaded
 	err       error
-	
-	
+
 	onCancel func()
 }
 
@@ -84,8 +79,6 @@ func (f *fakeReportQueue) Publish(_ context.Context, t task.ReportUploaded) erro
 	f.published = append(f.published, t)
 	return nil
 }
-
-
 
 type fakePortfolioClient struct {
 	portfoliopb.PortfolioServiceClient
@@ -127,8 +120,6 @@ func (f *fakePortfolioClient) GetReportImport(_ context.Context, in *portfoliopb
 	}
 	return imp, nil
 }
-
-
 
 const (
 	testBucket     = "reports"
@@ -180,8 +171,6 @@ func newTestReportsHandler(store ReportStore, queue ReportQueue, portfolio portf
 	}
 }
 
-
-
 func TestUpload_HappyPath_StoresQueuesAndReturns202(t *testing.T) {
 	store := newFakeReportStore()
 	queue := &fakeReportQueue{}
@@ -210,7 +199,7 @@ func TestUpload_HappyPath_StoresQueuesAndReturns202(t *testing.T) {
 	if pub.Bucket != testBucket {
 		t.Errorf("published bucket = %q, want %q", pub.Bucket, testBucket)
 	}
-	
+
 	if got := store.uploaded[testBucket+"/"+pub.ObjectKey]; !bytes.Equal(got, content) {
 		t.Errorf("stored object = %q, want %q (key %q)", got, content, pub.ObjectKey)
 	}
@@ -296,9 +285,6 @@ func TestUpload_PublishFailsAfterClientDisconnect_RollbackStillRuns(t *testing.T
 
 	h.Upload(rec, req)
 
-	
-	
-	
 	if store.orphaned {
 		t.Error("Remove saw a cancelled context - rollback is not detached from the request")
 	}
@@ -321,8 +307,6 @@ func TestUpload_PublishFailsAndRollbackFails_StillResponds502(t *testing.T) {
 
 	h.Upload(rec, req)
 
-	
-	
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502; body: %s", rec.Code, rec.Body.String())
 	}
@@ -402,7 +386,6 @@ func TestUpload_MissingBrokerField_400WithoutTouchingStore(t *testing.T) {
 	queue := &fakeReportQueue{}
 	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
 
-	
 	req := newUploadRequestWithBroker(t, "user-1", "file", "report.pdf", []byte("bytes"), "")
 	rec := httptest.NewRecorder()
 

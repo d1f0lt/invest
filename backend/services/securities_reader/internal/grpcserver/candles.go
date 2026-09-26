@@ -126,7 +126,7 @@ func (s *Server) loadCandles(ctx context.Context, secid, board string, r securit
 		c, err := s.Store.WeeklyCandles(ctx, secid, board)
 		return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK, err
 
-	default: 
+	default:
 		c, err := s.Store.WeeklyCandles(ctx, secid, board)
 		return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK, err
 	}

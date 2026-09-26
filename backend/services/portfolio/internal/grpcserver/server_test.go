@@ -24,6 +24,9 @@ type fakeStore struct {
 	trades     map[string][]storage.Trade
 	cash       map[string][]storage.CashOperation
 	prices     map[string]float64
+	prevCloses map[string]float64
+	closes     map[string][]storage.DailyClose
+	closesFrom time.Time
 	nextID     int
 
 	brokers map[string]storage.Broker
@@ -93,8 +96,7 @@ func (f *fakeStore) CreateTrade(_ context.Context, t storage.Trade) (storage.Tra
 }
 
 func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade) ([]storage.Trade, error) {
-	
-	
+
 	created := make([]storage.Trade, 0, len(trades))
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {
@@ -113,8 +115,6 @@ func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade)
 func (f *fakeStore) ListTrades(_ context.Context, portfolioID string) ([]storage.Trade, error) {
 	return f.trades[portfolioID], nil
 }
-
-
 
 func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, _ *storage.OpeningScope) (storage.ImportResult, error) {
 	var res storage.ImportResult
@@ -162,6 +162,31 @@ func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string
 
 func (f *fakeStore) ListCashOperations(_ context.Context, portfolioID string) ([]storage.CashOperation, error) {
 	return f.cash[portfolioID], nil
+}
+
+func (f *fakeStore) PrevCloses(_ context.Context, instruments [][2]string) (map[string]float64, error) {
+	out := map[string]float64{}
+	for _, inst := range instruments {
+		key := inst[0] + "/" + inst[1]
+		if p, ok := f.prevCloses[key]; ok {
+			out[key] = p
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) DailyCloses(_ context.Context, instruments [][2]string, from time.Time) (map[string][]storage.DailyClose, error) {
+	f.closesFrom = from
+	out := map[string][]storage.DailyClose{}
+	for _, inst := range instruments {
+		key := inst[0] + "/" + inst[1]
+		for _, c := range f.closes[key] {
+			if !c.Day.Before(from) {
+				out[key] = append(out[key], c)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) LatestPrices(_ context.Context, instruments [][2]string) (map[string]float64, error) {
@@ -555,7 +580,7 @@ func TestImportReport_IdempotentAndFeedsPnL(t *testing.T) {
 	if sum.GetTotalDividends() != 300 || sum.GetNetDeposits() != 6000 || sum.GetTotalAccruedInterest() != -82.26 {
 		t.Errorf("summary = %+v", sum)
 	}
-	
+
 	if d := sum.GetTotalPnl() - 416.74; d > 1e-6 || d < -1e-6 {
 		t.Errorf("total pnl = %v, want 416.74", sum.GetTotalPnl())
 	}

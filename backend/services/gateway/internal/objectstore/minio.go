@@ -41,9 +41,6 @@ func (s *Store) Upload(ctx context.Context, bucket, key string, r io.Reader, siz
 	return nil
 }
 
-
-
-
 func (s *Store) Remove(ctx context.Context, bucket, key string) error {
 	if err := s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("remove object %s/%s: %w", bucket, key, err)

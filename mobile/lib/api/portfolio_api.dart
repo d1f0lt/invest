@@ -25,6 +25,8 @@ class PortfolioStats {
     this.hasData = false,
     this.positions = const [],
     this.cashBalance = 0,
+    this.passiveIncome = 0,
+    this.passivePercent = 0,
   });
 
   /// Из ответа `GET /portfolios/{id}/pnl`.
@@ -45,16 +47,29 @@ class PortfolioStats {
       'total_other', 'net_deposits', 'cash_balance',
     ];
     final hasData = instruments.isNotEmpty || totals.any((k) => value(k) != 0);
+    final positions = instruments
+        .map((e) => Position.fromJson(e as Map<String, dynamic>))
+        .where((p) => p.quantity > 0)
+        .toList();
+    final cash = value('cash_balance');
+    // За день — изменение цены позиций к закрытию прошлого торгового дня
+    // (`total_day_change`), в % — от стоимости портфеля на то закрытие.
+    final dayProfit = value('total_day_change');
+    final total = positions.fold(0.0, (sum, p) => sum + p.value) + cash;
+    final dayBase = total - dayProfit;
+    // Пассивный доход — полученные дивиденды и купоны (после налога,
+    // удержанного брокером); в % — от чистых пополнений, как и прибыль.
+    final passive = value('total_dividends') + value('total_coupons');
     return PortfolioStats(
       hasData: hasData,
-      positions: instruments
-          .map((e) => Position.fromJson(e as Map<String, dynamic>))
-          .where((p) => p.quantity > 0)
-          .toList(),
-      cashBalance: value('cash_balance'),
+      positions: positions,
+      cashBalance: cash,
       profit: profit,
       profitPercent: percent,
-      // TODO: изменение за день — в API нет цен закрытия прошлого дня.
+      dayProfit: dayProfit,
+      dayPercent: dayBase > 0 ? dayProfit / dayBase * 100 : 0.0,
+      passiveIncome: passive,
+      passivePercent: deposits > 0 ? passive / deposits * 100 : 0.0,
       // TODO: доходность — годовая (XIRR по пополнениям), пока = прибыль / пополнения.
       yieldPercent: percent,
     );
@@ -76,6 +91,15 @@ class PortfolioStats {
 
   /// Свободные рубли на счёте (`cash_balance`).
   final double cashBalance;
+
+  /// Полученные дивиденды + купоны.
+  final double passiveIncome;
+
+  /// [passiveIncome] в % от чистых пополнений.
+  final double passivePercent;
+
+  /// Текущая стоимость портфеля: бумаги (без цены — по цене покупки) + рубли.
+  double get totalValue => positions.fold(0.0, (sum, p) => sum + p.value) + cashBalance;
 }
 
 /// Открытая позиция по бумаге (элемент `instruments` из `/pnl`).
@@ -88,6 +112,7 @@ class Position {
     this.currentPrice,
     this.marketValue,
     this.unrealizedPnl,
+    this.dayChange,
   });
 
   factory Position.fromJson(Map<String, dynamic> json) {
@@ -100,6 +125,7 @@ class Position {
       currentPrice: opt('current_price'),
       marketValue: opt('market_value'),
       unrealizedPnl: opt('unrealized_pnl'),
+      dayChange: opt('day_change'),
     );
   }
 
@@ -119,6 +145,10 @@ class Position {
   /// Изменение стоимости позиции относительно цены покупки.
   final double? unrealizedPnl;
 
+  /// Изменение стоимости позиции с закрытия прошлого торгового дня.
+  /// Нет текущей цены или цены закрытия — null.
+  final double? dayChange;
+
   String get key => '$secid@$board';
 
   /// Сколько заплачено за текущее количество.
@@ -131,6 +161,14 @@ class Position {
     final pnl = unrealizedPnl;
     if (pnl == null || cost == 0) return null;
     return pnl / cost * 100;
+  }
+
+  /// [dayChange] в % от стоимости позиции на прошлом закрытии.
+  double? get dayChangePercent {
+    final change = dayChange, mv = marketValue;
+    if (change == null || mv == null) return null;
+    final base = mv - change;
+    return base == 0 ? null : change / base * 100;
   }
 }
 
@@ -245,6 +283,38 @@ class CashOperation {
   bool get isOpeningSecurities => isOpening && externalId.contains(':securities:');
 }
 
+/// Период графика стоимости портфеля (`range` у `/portfolios/{id}/history`).
+enum ValueRange {
+  week('week'),
+  month('month'),
+  year('year'),
+  all('all');
+
+  const ValueRange(this.apiName);
+
+  final String apiName;
+}
+
+/// Стоимость портфеля на конец дня.
+class ValuePoint {
+  const ValuePoint({required this.date, required this.value, required this.netDeposits});
+
+  factory ValuePoint.fromJson(Map<String, dynamic> json) => ValuePoint(
+        date: DateTime.parse(json['date'] as String),
+        value: (json['value'] as num?)?.toDouble() ?? 0,
+        netDeposits: (json['net_deposits'] as num?)?.toDouble() ?? 0,
+      );
+
+  /// 00:00 МСК дня (UTC).
+  final DateTime date;
+
+  /// Бумаги по закрытию дня + рубли на счёте.
+  final double value;
+
+  /// Пополнения минус выводы к концу дня.
+  final double netDeposits;
+}
+
 /// Метка в external_id строк вводного остатка (см. парсер отчётов).
 const openingMarker = ':opening:';
 
@@ -289,6 +359,18 @@ class PortfolioApi {
       auth: true,
     );
     return PortfolioStats.fromPnL(json! as Map<String, dynamic>);
+  }
+
+  /// `GET /api/v1/portfolios/{id}/history?range=…` → стоимость портфеля
+  /// по дням, старые первыми.
+  Future<List<ValuePoint>> history(String portfolioId, ValueRange range) async {
+    final json = await _client.get(
+      '/api/v1/portfolios/${Uri.encodeComponent(portfolioId)}/history?range=${range.apiName}',
+      auth: true,
+    ) as Map<String, dynamic>?;
+    return (json?['points'] as List<dynamic>? ?? const [])
+        .map((e) => ValuePoint.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// `GET /api/v1/portfolios/{id}/trades` → все сделки.

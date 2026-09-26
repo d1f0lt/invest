@@ -57,7 +57,7 @@ func TestGetCandles_DayUsesLastTradingDayHours(t *testing.T) {
 			storage.IntervalHour: {{Start: at(25, 18), Close: 1}, {Start: at(26, 10), Close: 2}, {Start: at(26, 11), Close: 3}},
 		},
 	}
-	
+
 	s := candlesServer(store, at(27, 12))
 
 	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: " sber ", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY})

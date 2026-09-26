@@ -6,18 +6,6 @@ import (
 	"strings"
 )
 
-
-
-
-
-
-
-
-
-
-
-
-
 func (s *Store) SearchSecurities(ctx context.Context, query string, limit int) ([]PriceView, error) {
 	like := escapeLike(query)
 	rows, err := s.db.QueryContext(ctx, `
@@ -70,8 +58,6 @@ func (s *Store) SearchSecurities(ctx context.Context, query string, limit int) (
 	defer rows.Close()
 	return scanPriceRows(rows)
 }
-
-
 
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)

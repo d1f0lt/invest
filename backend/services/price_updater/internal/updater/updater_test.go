@@ -18,11 +18,11 @@ func fp(v float64) *float64 { return &v }
 func sp(v string) *string   { return &v }
 
 func TestBuildRows(t *testing.T) {
-	collected := time.Date(2026, 9, 24, 11, 37, 0, 0, time.UTC) 
+	collected := time.Date(2026, 9, 24, 11, 37, 0, 0, time.UTC)
 	quotes := map[string]moexclient.MarketQuote{
 		"SBER":   {Last: fp(305), Open: fp(300), High: fp(306), Low: fp(299), TradingStatus: sp("T")},
 		"CLOSED": {Last: fp(100), Open: fp(99), TradingStatus: sp("N")},
-		"BOND":   {Last: fp(98.5), TradingStatus: sp("T")}, 
+		"BOND":   {Last: fp(98.5), TradingStatus: sp("T")},
 		"NOLAST": {TradingStatus: sp("T")},
 	}
 
@@ -56,7 +56,7 @@ func TestBuildRows(t *testing.T) {
 }
 
 func TestBuildRowsHourBoundaryUsesMoscowTime(t *testing.T) {
-	collected := time.Date(2026, 9, 23, 21, 5, 0, 0, time.UTC) 
+	collected := time.Date(2026, 9, 23, 21, 5, 0, 0, time.UTC)
 	_, hourly, daily := buildRows("TQBR", map[string]moexclient.MarketQuote{
 		"SBER": {Last: fp(1), Open: fp(1), TradingStatus: sp("T")},
 	}, collected, msk)
@@ -85,7 +85,7 @@ func TestNextDailyRun(t *testing.T) {
 }
 
 type fakeClient struct {
-	history map[string][]moexclient.DailyCandle 
+	history map[string][]moexclient.DailyCandle
 	asked   []string
 	failN   map[string]int
 }
@@ -171,7 +171,7 @@ func TestHistoryJobCatchesUpFromLastSyncedDate(t *testing.T) {
 }
 
 func TestHistoryJobRetriesEmptyYesterday(t *testing.T) {
-	c := &fakeClient{history: map[string][]moexclient.DailyCandle{}} 
+	c := &fakeClient{history: map[string][]moexclient.DailyCandle{}}
 	s := &fakeStore{synced: map[string]time.Time{"TQBR": day("2026-09-21")}}
 	now := time.Date(2026, 9, 24, 3, 0, 0, 0, msk)
 

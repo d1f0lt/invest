@@ -16,16 +16,6 @@ const (
 	reconnectMaxDelay = 30 * time.Second
 )
 
-
-
-
-
-
-
-
-
-
-
 type Consumer struct {
 	url   string
 	queue string
@@ -36,8 +26,6 @@ type Consumer struct {
 	channel *amqp.Channel
 	closed  bool
 }
-
-
 
 func Connect(url, queueName string, log *slog.Logger) (*Consumer, error) {
 	c := &Consumer{url: url, queue: queueName, log: log}
@@ -81,9 +69,6 @@ func (c *Consumer) connect() error {
 	c.conn, c.channel = conn, ch
 	return nil
 }
-
-
-
 
 func (c *Consumer) Run(ctx context.Context, consumerTag string, handle func(context.Context, <-chan amqp.Delivery)) {
 	delay := reconnectMinDelay
@@ -131,8 +116,6 @@ func (c *Consumer) Run(ctx context.Context, consumerTag string, handle func(cont
 		delay = min(delay*2, reconnectMaxDelay)
 	}
 }
-
-
 
 func (c *Consumer) drop(ch *amqp.Channel) {
 	c.mu.Lock()

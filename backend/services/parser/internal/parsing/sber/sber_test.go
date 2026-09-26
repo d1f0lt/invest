@@ -1,18 +1,15 @@
 package sber
 
 import (
-	"strings"
 	"errors"
 	"math"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"invest/backend/services/parser/internal/parsing"
 )
-
-
-
 
 func mustParse(t *testing.T, file string) parsing.Report {
 	t.Helper()
@@ -56,13 +53,11 @@ func TestTrades_BondUsesReferenceSecidAndMoneyPrice(t *testing.T) {
 	if bond == nil {
 		t.Fatal("OFZ trade not found")
 	}
-	
-	
+
 	if bond.SecID != "SU26254RMFS1" || bond.Board != "TQOB" {
 		t.Errorf("bond secid/board = %s/%s, want SU26254RMFS1/TQOB", bond.SecID, bond.Board)
 	}
-	
-	
+
 	if bond.Price != 841 || bond.AccruedInterest != 82.26 || !near(bond.Fee, 7.83) {
 		t.Errorf("bond = %+v", *bond)
 	}
@@ -92,7 +87,7 @@ func TestCash_Classification(t *testing.T) {
 			divs[c.SecID+"/"+c.Board] = c.Amount
 		}
 	}
-	
+
 	want := map[string]float64{"MOEX/TQBR": 16.57, "MTSS/TQBR": 2460, "SBERP/TQBR": 130.56, "SBER/TQBR": 458.96}
 	for k, v := range want {
 		if !near(divs[k], v) {
@@ -100,8 +95,6 @@ func TestCash_Classification(t *testing.T) {
 		}
 	}
 }
-
-
 
 func TestReconcilesToClosingBalance(t *testing.T) {
 	r := mustParse(t, "iis_2026-06-06_2026-08-05.html")
@@ -125,7 +118,7 @@ func TestReconcilesToClosingBalance(t *testing.T) {
 func TestOverlappingReportsShareExternalIDs(t *testing.T) {
 	full := mustParse(t, "iis_2026-06-06_2026-08-05.html")
 	month := mustParse(t, "iis_2026-08-01_2026-08-31.html")
-	day := mustParse(t, "iis_2026-08-04_unsettled.html") 
+	day := mustParse(t, "iis_2026-08-04_unsettled.html")
 
 	ids := map[string]bool{}
 	for _, tr := range full.Trades {
@@ -134,8 +127,6 @@ func TestOverlappingReportsShareExternalIDs(t *testing.T) {
 	for _, c := range full.CashOperations {
 		ids[c.ExternalID] = true
 	}
-	// Вводные остатки (":opening:") у отчётов с разным началом периода
-	// разные — какой применить, решает portfolio (см. TestOpeningBalance).
 	for _, r := range []parsing.Report{month, day} {
 		for _, tr := range r.Trades {
 			if strings.Contains(tr.ExternalID, parsing.OpeningMarker) {
@@ -169,7 +160,6 @@ func TestIdenticalRowsSameDayGetDistinctIDs(t *testing.T) {
 
 func TestNoTradesReport(t *testing.T) {
 	r := mustParse(t, "brokerage_2026-08-01_2026-08-31_no_trades.html")
-	// Сделок нет, но на начало периода на счёте 4 бумаги — вводный остаток.
 	if len(r.Trades) != 4 {
 		t.Errorf("trades = %d, want 4 opening positions", len(r.Trades))
 	}
@@ -178,8 +168,6 @@ func TestNoTradesReport(t *testing.T) {
 			t.Errorf("unexpected non-opening trade %+v", tr)
 		}
 	}
-	// 2 дивиденда, выплаченные на внешний счёт (пара «дивиденд +» / «вывод −»),
-	// и 2 пополнения вводного остатка: бумаги и деньги.
 	if len(r.CashOperations) != 6 {
 		t.Fatalf("cash operations = %d, want 6: %+v", len(r.CashOperations), r.CashOperations)
 	}
@@ -241,12 +229,10 @@ func TestOpeningBalance(t *testing.T) {
 			cash += c.Amount
 		}
 	}
-	// «Итого по площадке Фондовый рынок» на начало периода и остаток денег.
 	if !near(value, 5119.09) || !near(securities, 5119.09) || !near(cash, 2.56) {
 		t.Errorf("opening value %.2f, securities deposit %.2f, cash %.2f; want 5119.09 / 5119.09 / 2.56", value, securities, cash)
 	}
 
-	// Отчёт с нуля (счёт открыт в периоде) — вводного остатка нет.
 	full := mustParse(t, "iis_2026-06-06_2026-08-05.html")
 	for _, tr := range full.Trades {
 		if strings.Contains(tr.ExternalID, parsing.OpeningMarker) {

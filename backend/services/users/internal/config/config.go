@@ -17,10 +17,6 @@ type Config struct {
 
 	RefreshTokenTTL time.Duration
 
-	
-	
-	
-	
 	CleanupInterval  time.Duration
 	CleanupRetention time.Duration
 
@@ -47,7 +43,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid ACCESS_TOKEN_TTL: %w", err)
 	}
 	if ttl <= 0 {
-		
+
 		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL must be positive, got %s", ttl)
 	}
 	cfg.AccessTokenTTL = ttl

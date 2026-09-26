@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 package pnl
 
 import (
@@ -28,10 +20,9 @@ type Trade struct {
 	Price      float64
 	Fee        float64
 	ExecutedAt time.Time
-	
+
 	AccruedInterest float64
 }
-
 
 const (
 	CashDeposit    = "deposit"
@@ -43,8 +34,6 @@ const (
 	CashFee        = "fee"
 	CashOther      = "other"
 )
-
-
 
 type CashFlow struct {
 	Type       string
@@ -68,14 +57,14 @@ type InstrumentPnL struct {
 
 	UnrealizedPnL *float64
 
+	DayChange *float64
+
 	RealizedPnL float64
 
 	Dividends       float64
 	Coupons         float64
-	AccruedInterest float64 
+	AccruedInterest float64
 }
-
-
 
 func (i InstrumentPnL) TotalPnL() float64 {
 	total := i.RealizedPnL + i.Dividends + i.Coupons + i.AccruedInterest
@@ -93,14 +82,13 @@ type Summary struct {
 	TotalDividends       float64
 	TotalCoupons         float64
 	TotalAccruedInterest float64
-	TotalTaxes           float64 
-	TotalFees            float64 
+	TotalTaxes           float64
+	TotalFees            float64
 	TotalOther           float64
 	NetDeposits          float64
 	CashBalance          float64
+	TotalDayChange       float64
 }
-
-
 
 func (s Summary) TotalPnL() float64 {
 	return s.TotalRealizedPnL + s.TotalUnrealizedPnL +
@@ -109,8 +97,6 @@ func (s Summary) TotalPnL() float64 {
 }
 
 func PriceKey(secid, board string) string { return secid + "/" + board }
-
-
 
 type event struct {
 	at         time.Time
@@ -174,7 +160,7 @@ func Compute(trades []Trade, cash []CashFlow, currentPrices map[string]float64) 
 				a := get(c.SecID, c.Board)
 				a.events = append(a.events, event{at: c.OccurredAt, redemption: c.Amount})
 			} else {
-				
+
 				summary.TotalOther += c.Amount
 			}
 		case CashTax:
@@ -232,9 +218,7 @@ func computeInstrument(secid, board string, events []event) InstrumentPnL {
 	var runningQty, runningCost float64
 	for _, e := range events {
 		if e.trade == nil {
-			
-			
-			
+
 			runningCost -= e.redemption
 			if runningCost < 0 {
 				res.RealizedPnL += -runningCost
@@ -269,4 +253,19 @@ func computeInstrument(secid, board string, events []event) InstrumentPnL {
 		res.AvgCost = runningCost / runningQty
 	}
 	return res
+}
+
+func ApplyDayChange(summary *Summary, prevCloses map[string]float64) {
+	summary.TotalDayChange = 0
+	for i := range summary.Instruments {
+		in := &summary.Instruments[i]
+		in.DayChange = nil
+		prev, ok := prevCloses[PriceKey(in.SecID, in.Board)]
+		if !ok || in.CurrentPrice == nil || in.Quantity <= 0 {
+			continue
+		}
+		change := in.Quantity * (*in.CurrentPrice - prev)
+		in.DayChange = &change
+		summary.TotalDayChange += change
+	}
 }
