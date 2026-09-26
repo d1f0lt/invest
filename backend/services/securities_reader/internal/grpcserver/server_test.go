@@ -20,15 +20,15 @@ type fakeStore struct {
 	lastQueried []string
 
 	boards  map[string][]string
-	candles map[string][]storage.Candle 
+	candles map[string][]storage.Candle
 	weekly  []storage.Candle
-	
+
 	gotInterval string
 	gotFrom     time.Time
 
-	found    []storage.PriceView
+	found []storage.PriceView
 
-	refs map[string]storage.SecurityRef
+	refs     map[string]storage.SecurityRef
 	gotQuery string
 	gotLimit int
 }

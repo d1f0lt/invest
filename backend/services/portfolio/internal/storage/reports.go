@@ -10,10 +10,7 @@ import (
 	"github.com/lib/pq"
 )
 
-
-
 var ErrImportFinished = errors.New("report import is already finished")
-
 
 const (
 	ImportQueued     = "queued"
@@ -26,7 +23,7 @@ type Broker struct {
 	ID          string
 	Name        string
 	FileFormats []string
-	IconURL     string 
+	IconURL     string
 	Color       string
 	Enabled     bool
 }
@@ -46,7 +43,6 @@ type ReportImport struct {
 	UpdatedAt  time.Time
 	FinishedAt *time.Time
 }
-
 
 func (s *Store) ListBrokers(ctx context.Context) ([]Broker, error) {
 	const stmt = `
@@ -70,7 +66,6 @@ func (s *Store) ListBrokers(ctx context.Context) ([]Broker, error) {
 	}
 	return out, rows.Err()
 }
-
 
 func (s *Store) GetBroker(ctx context.Context, id string) (Broker, error) {
 	const stmt = `
@@ -109,8 +104,6 @@ func scanReportImport(row rowScanner) (ReportImport, error) {
 	return r, err
 }
 
-
-
 func (s *Store) CreateReportImport(ctx context.Context, r ReportImport) (ReportImport, error) {
 	stmt := `
 		INSERT INTO report_imports (id, portfolio_id, broker_id, filename, status)
@@ -127,8 +120,6 @@ func (s *Store) CreateReportImport(ctx context.Context, r ReportImport) (ReportI
 	return out, nil
 }
 
-
-
 func (s *Store) GetReportImport(ctx context.Context, id string) (ReportImport, error) {
 	stmt := `SELECT ` + reportImportColumns + ` FROM report_imports WHERE id = $1`
 	r, err := scanReportImport(s.db.QueryRowContext(ctx, stmt, id))
@@ -140,7 +131,6 @@ func (s *Store) GetReportImport(ctx context.Context, id string) (ReportImport, e
 	}
 	return r, nil
 }
-
 
 func (s *Store) ListReportImports(ctx context.Context, portfolioID string) ([]ReportImport, error) {
 	stmt := `SELECT ` + reportImportColumns + `
@@ -162,9 +152,6 @@ func (s *Store) ListReportImports(ctx context.Context, portfolioID string) ([]Re
 	}
 	return out, rows.Err()
 }
-
-
-
 
 func (s *Store) UpdateReportImportStatus(ctx context.Context, id, status, errMsg string) (ReportImport, error) {
 	stmt := `

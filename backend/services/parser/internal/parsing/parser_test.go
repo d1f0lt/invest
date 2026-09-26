@@ -7,7 +7,6 @@ import (
 	"invest/backend/services/parser/internal/task"
 )
 
-
 type staticParser struct {
 	trades []Trade
 	err    error
@@ -32,10 +31,7 @@ func TestDispatcher_ResolvesByBroker(t *testing.T) {
 }
 
 func TestDispatcher_KeyNormalization(t *testing.T) {
-	
-	
-	
-	
+
 	want := []Trade{{SecID: "LKOH", Board: "TQBR", Side: "sell", Quantity: 2, Price: 5000}}
 	d := NewDispatcher()
 	d.Register("TCS Investments", staticParser{trades: want})

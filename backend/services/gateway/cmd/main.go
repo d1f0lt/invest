@@ -27,11 +27,9 @@ func main() {
 	log := newLogger(cfg.LogLevel)
 	slog.SetDefault(log)
 
-	
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	
 	store, err := objectstore.New(objectstore.Config{
 		Endpoint:  cfg.MinIOEndpoint,
 		AccessKey: cfg.MinIOAccessKey,
@@ -43,7 +41,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	
 	publisher, err := queue.Connect(cfg.RabbitMQURL, cfg.RabbitMQQueue)
 	if err != nil {
 		log.Error("failed to connect to rabbitmq", "error", err)
@@ -51,7 +48,6 @@ func main() {
 	}
 	defer publisher.Close()
 
-	
 	clients, err := upstream.Dial(upstream.Addrs{
 		Users:            cfg.UsersGRPCAddr,
 		Portfolio:        cfg.PortfolioGRPCAddr,

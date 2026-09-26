@@ -49,9 +49,6 @@ func (s *Server) SearchSecurities(ctx context.Context, req *securitiesreaderpb.S
 	return &securitiesreaderpb.SearchSecuritiesResponse{Securities: out}, nil
 }
 
-
-
-
 func normalizeQuery(q string) string {
 	q = strings.Join(strings.Fields(q), " ")
 	return strings.ReplaceAll(strings.ToLower(q), "ё", "е")

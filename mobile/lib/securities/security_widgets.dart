@@ -193,3 +193,60 @@ class SecurityTile extends StatelessWidget {
     );
   }
 }
+
+/// Ряд «таблеток»: выбранная — контрастная, остальные — приглушённые.
+class Pills<T> extends StatelessWidget {
+  const Pills({
+    super.key,
+    required this.values,
+    required this.selected,
+    required this.label,
+    required this.onSelected,
+    this.compact = false,
+  });
+
+  final List<T> values;
+  final T selected;
+  final String Function(T) label;
+  final ValueChanged<T> onSelected;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          for (final v in values)
+            Padding(
+              padding: EdgeInsets.only(right: compact ? 6 : 10),
+              child: Material(
+                color: v == selected ? scheme.inverseSurface : scheme.surfaceContainerHighest,
+                shape: const StadiumBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => onSelected(v),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 14 : 20,
+                      vertical: compact ? 8 : 11,
+                    ),
+                    child: Text(
+                      label(v),
+                      style: (compact ? textTheme.labelLarge : textTheme.titleSmall)?.copyWith(
+                        color: v == selected ? scheme.onInverseSurface : scheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

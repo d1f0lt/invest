@@ -16,12 +16,9 @@ import (
 	"invest/backend/services/parser/internal/task"
 )
 
-
 type Downloader interface {
 	Download(ctx context.Context, bucket, key string) ([]byte, error)
 }
-
-
 
 type Portfolio interface {
 	ImportReport(ctx context.Context, userID, portfolioID, importID string, r parsing.Report) (portfolioclient.ImportResult, error)
@@ -35,13 +32,11 @@ type Worker struct {
 	Log       *slog.Logger
 }
 
-
 const (
 	statusProcessing = "processing"
 	statusDone       = "done"
 	statusFailed     = "failed"
 )
-
 
 const (
 	msgUnsupportedBroker = "Отчёты этого брокера пока не поддерживаются"
@@ -73,9 +68,6 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 	}
 	log := w.Log.With("task_id", t.TaskID, "user_id", t.UserID, "portfolio_id", t.PortfolioID, "broker", t.Broker)
 
-	
-	
-	
 	importID := t.TaskID
 	if err := w.Portfolio.SetImportStatus(ctx, t.UserID, importID, statusProcessing, ""); err != nil {
 		switch status.Code(err) {
@@ -83,8 +75,7 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 			log.Warn("no report import for this task, status won't be tracked", "error", err)
 			importID = ""
 		case codes.FailedPrecondition:
-			
-			
+
 			log.Info("report import already finished, reprocessing anyway")
 		default:
 			log.Warn("mark report import processing", "error", err)
@@ -118,8 +109,7 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 	}
 
 	if report.Empty() {
-		
-		
+
 		log.Info("report has no trades or cash operations, nothing to import")
 		w.setStatus(ctx, log, t.UserID, importID, statusDone, "")
 		_ = d.Ack(false)
@@ -129,8 +119,7 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 	res, err := w.Portfolio.ImportReport(ctx, t.UserID, t.PortfolioID, importID, report)
 	if err != nil {
 		if isPermanent(err) {
-			
-			
+
 			log.Error("portfolio rejected report, dropping task", "error", err)
 			w.fail(ctx, log, t.UserID, importID, rejectMessage(err))
 			_ = d.Nack(false, false)
@@ -151,7 +140,6 @@ func (w *Worker) fail(ctx context.Context, log *slog.Logger, userID, importID, m
 	w.setStatus(ctx, log, userID, importID, statusFailed, message)
 }
 
-
 func (w *Worker) setStatus(ctx context.Context, log *slog.Logger, userID, importID, st, message string) {
 	if importID == "" {
 		return
@@ -161,11 +149,10 @@ func (w *Worker) setStatus(ctx context.Context, log *slog.Logger, userID, import
 	}
 }
 
-
 func rejectMessage(err error) string {
 	st, _ := status.FromError(err)
 	if st.Code() == codes.FailedPrecondition && strings.Contains(st.Message(), "unknown secid/board") {
-		
+
 		msg := st.Message()
 		if i := strings.LastIndex(msg, ": "); i >= 0 && i+2 < len(msg) {
 			return msgUnknownInstrument + ": " + msg[i+2:]

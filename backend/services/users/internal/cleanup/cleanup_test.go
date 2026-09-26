@@ -40,7 +40,7 @@ func TestRun_DeletesImmediatelyAndOnTick(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
 	defer cancel()
-	r.Run(ctx) 
+	r.Run(ctx)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -85,7 +85,7 @@ func TestRun_SurvivesStoreError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	r.Run(ctx) 
+	r.Run(ctx)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()

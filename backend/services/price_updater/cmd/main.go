@@ -43,8 +43,6 @@ func main() {
 
 	client := moexclient.New(cfg.MoexISSBaseURL, cfg.HTTPTimeout)
 
-	
-	
 	moscow, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
 		log.Error("failed to load Europe/Moscow time zone", "error", err)
@@ -66,8 +64,6 @@ func main() {
 		RequestPause: cfg.HistoryRequestPause,
 	}, log)
 
-	
-	
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); u.Run(ctx, cfg.PollInterval) }()

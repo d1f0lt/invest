@@ -34,8 +34,6 @@ type ImportResult struct {
 	CashCreated, CashSkipped     int
 }
 
-
-
 func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID string, r parsing.Report) (ImportResult, error) {
 	ctx = authmd.WithUserID(ctx, userID)
 
@@ -99,8 +97,6 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID
 func submitTimeout(rows int) time.Duration {
 	return 30*time.Second + time.Duration(rows)*200*time.Millisecond
 }
-
-
 
 func (c *Client) SetImportStatus(ctx context.Context, userID, importID, status, message string) error {
 	ctx, cancel := context.WithTimeout(authmd.WithUserID(ctx, userID), 10*time.Second)

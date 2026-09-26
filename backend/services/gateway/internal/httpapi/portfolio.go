@@ -98,12 +98,14 @@ type holdingResponse struct {
 	CurrentPrice  *float64 `json:"current_price,omitempty"`
 	MarketValue   *float64 `json:"market_value,omitempty"`
 	UnrealizedPnL *float64 `json:"unrealized_pnl,omitempty"`
+	DayChange     *float64 `json:"day_change,omitempty"`
 }
 
 func toHoldingResponse(h *portfoliopb.Holding) holdingResponse {
 	return holdingResponse{
 		SecID: h.GetSecid(), Board: h.GetBoard(), Quantity: h.GetQuantity(), AvgCost: h.GetAvgCost(),
 		CurrentPrice: h.CurrentPrice, MarketValue: h.MarketValue, UnrealizedPnL: h.UnrealizedPnl,
+		DayChange: h.DayChange,
 	}
 }
 
@@ -140,6 +142,7 @@ type pnlSummaryResponse struct {
 	TotalOther           float64                 `json:"total_other"`
 	NetDeposits          float64                 `json:"net_deposits"`
 	CashBalance          float64                 `json:"cash_balance"`
+	TotalDayChange       float64                 `json:"total_day_change"`
 }
 
 func toPnLSummaryResponse(s *portfoliopb.PnLSummary) pnlSummaryResponse {
@@ -160,6 +163,7 @@ func toPnLSummaryResponse(s *portfoliopb.PnLSummary) pnlSummaryResponse {
 		TotalOther:           s.GetTotalOther(),
 		NetDeposits:          s.GetNetDeposits(),
 		CashBalance:          s.GetCashBalance(),
+		TotalDayChange:       s.GetTotalDayChange(),
 	}
 }
 
@@ -181,9 +185,6 @@ func (h *Handlers) handleCreatePortfolio(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusCreated, toPortfolioResponse(p))
 }
-
-
-
 
 func (h *Handlers) handleUpdatePortfolio(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())

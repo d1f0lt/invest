@@ -17,15 +17,10 @@ import (
 	"invest/backend/services/gateway/internal/task"
 )
 
-
-
-
 type ReportStore interface {
 	Upload(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	Remove(ctx context.Context, bucket, key string) error
 }
-
-
 
 type ReportQueue interface {
 	Publish(ctx context.Context, t task.ReportUploaded) error
@@ -42,9 +37,6 @@ type ReportsHandler struct {
 
 	MaxUploadBytes int64
 
-	
-	
-	
 	CleanupTimeout time.Duration
 
 	Log *slog.Logger
@@ -81,10 +73,6 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	taskID := uuid.NewString()
 	filename := sanitizeFilename(header.Filename)
 
-	
-	
-	
-	
 	imp, err := h.createImport(r.Context(), userID, &portfoliopb.CreateReportImportRequest{
 		Id:          taskID,
 		PortfolioId: portfolioID,
@@ -128,8 +116,6 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, toReportImportResponse(imp))
 }
 
-
-
 func (h *ReportsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
 	ctx, cancel := context.WithTimeout(r.Context(), h.UpstreamTimeout)
@@ -171,9 +157,6 @@ func (h *ReportsHandler) createImport(reqCtx context.Context, userID string, req
 	defer cancel()
 	return h.Portfolio.CreateReportImport(auth.WithUserID(ctx, userID), req)
 }
-
-
-
 
 func (h *ReportsHandler) failImport(reqCtx context.Context, userID, taskID, message string) {
 	timeout := h.CleanupTimeout
@@ -234,13 +217,6 @@ func toReportImportResponse(r *portfoliopb.ReportImport) reportImportResponse {
 	}
 	return out
 }
-
-
-
-
-
-
-
 
 func (h *ReportsHandler) rollbackUpload(reqCtx context.Context, objectKey, taskID string) {
 	timeout := h.CleanupTimeout

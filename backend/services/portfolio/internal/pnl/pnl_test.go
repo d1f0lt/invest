@@ -130,15 +130,15 @@ func TestIncomeTaxesAndDepositsInSummary(t *testing.T) {
 	if !almostEqual(s.NetDeposits, 4000) {
 		t.Errorf("NetDeposits = %v, want 4000", s.NetDeposits)
 	}
-	
+
 	if !almostEqual(s.CashBalance, 1239) {
 		t.Errorf("CashBalance = %v, want 1239", s.CashBalance)
 	}
-	
+
 	if !almostEqual(s.TotalPnL(), 439) {
 		t.Errorf("TotalPnL = %v, want 439", s.TotalPnL())
 	}
-	
+
 	mv := *s.Instruments[0].MarketValue
 	if !almostEqual(mv+s.CashBalance-s.NetDeposits, s.TotalPnL()) {
 		t.Errorf("value identity broken: mv %v + cash %v - deposits %v != pnl %v", mv, s.CashBalance, s.NetDeposits, s.TotalPnL())
@@ -150,8 +150,7 @@ func TestIncomeTaxesAndDepositsInSummary(t *testing.T) {
 }
 
 func TestBondAccruedInterestCouponAndRedemption(t *testing.T) {
-	
-	
+
 	trades := []Trade{
 		{SecID: "SU26254RMFS1", Board: "TQOB", Side: Buy, Quantity: 3, Price: 841, Fee: 7.83, AccruedInterest: 82.26, ExecutedAt: t0(0)},
 	}
@@ -165,11 +164,11 @@ func TestBondAccruedInterestCouponAndRedemption(t *testing.T) {
 	if !almostEqual(inst.AccruedInterest, -82.26) || !almostEqual(inst.Coupons, 112.20) {
 		t.Errorf("accrued %v coupons %v", inst.AccruedInterest, inst.Coupons)
 	}
-	
+
 	if !almostEqual(inst.RealizedPnL, 469.17) {
 		t.Errorf("RealizedPnL = %v, want 469.17", inst.RealizedPnL)
 	}
-	
+
 	if !almostEqual(s.TotalPnL(), 499.11) {
 		t.Errorf("TotalPnL = %v, want 499.11", s.TotalPnL())
 	}

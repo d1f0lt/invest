@@ -141,9 +141,7 @@ func (s *Store) TouchLastLogin(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateRefreshToken(ctx context.Context, userID, familyID, tokenHash string, expiresAt time.Time) (RefreshToken, error) {
-	
-	
-	
+
 	const stmt = `
 		INSERT INTO refresh_tokens (user_id, family_id, token_hash, expires_at)
 		VALUES ($1, COALESCE(NULLIF($2::text, '')::uuid, gen_random_uuid()), $3, $4)
@@ -177,11 +175,6 @@ func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (Re
 	return rt, nil
 }
 
-
-
-
-
-
 func (s *Store) ClaimRefreshToken(ctx context.Context, id string) (bool, error) {
 	const stmt = `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()`
 	res, err := s.db.ExecContext(ctx, stmt, id)
@@ -194,9 +187,6 @@ func (s *Store) ClaimRefreshToken(ctx context.Context, id string) (bool, error) 
 	}
 	return n == 1, nil
 }
-
-
-
 
 func (s *Store) RevokeRefreshTokenFamily(ctx context.Context, familyID string) error {
 	const stmt = `UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`
@@ -215,11 +205,6 @@ func (s *Store) RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) 
 	}
 	return nil
 }
-
-
-
-
-
 
 func (s *Store) DeleteExpiredRefreshTokens(ctx context.Context, cutoff time.Time) (int64, error) {
 	const stmt = `DELETE FROM refresh_tokens WHERE expires_at < $1`

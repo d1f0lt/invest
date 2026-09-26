@@ -14,27 +14,21 @@ import (
 var (
 	ErrNotFound          = errors.New("not found")
 	ErrUnknownInstrument = errors.New("unknown instrument: no such secid/board in securities")
-	
-	
+
 	ErrDuplicate = errors.New("duplicate external_id")
 )
 
 const (
 	postgresForeignKeyViolation = "23503"
 	postgresUniqueViolation     = "23505"
-	
+
 	postgresInvalidTextRepresentation = "22P02"
 )
-
-
 
 func isInvalidText(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == postgresInvalidTextRepresentation
 }
-
-
-
 
 func mapInsertErr(err error, t Trade) error {
 	var pqErr *pq.Error
@@ -71,11 +65,9 @@ type Trade struct {
 	CreatedAt   time.Time
 
 	AccruedInterest float64
-	
+
 	ExternalID string
 
-	// Только для импорта отчётов: название и ISIN бумаги из отчёта
-	// (см. ensureSecurities). В БД сделки не сохраняются.
 	SecurityName string
 	ISIN         string
 }
@@ -87,14 +79,12 @@ type CashOperation struct {
 	Amount      float64
 	Currency    string
 	OccurredAt  time.Time
-	SecID       string 
+	SecID       string
 	Board       string
 	Description string
 	ExternalID  string
 	CreatedAt   time.Time
 }
-
-
 
 type ImportResult struct {
 	TradesCreated, TradesSkipped int
@@ -172,8 +162,7 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 	`
 	var p Portfolio
 	err := s.db.QueryRowContext(ctx, stmt, id).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
-	
-	
+
 	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
 		return Portfolio{}, ErrNotFound
 	}
@@ -182,8 +171,6 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 	}
 	return p, nil
 }
-
-
 
 func (s *Store) RenamePortfolio(ctx context.Context, id, name string) (Portfolio, error) {
 	const stmt = `
@@ -222,12 +209,6 @@ func (s *Store) CreateTrade(ctx context.Context, t Trade) (Trade, error) {
 	}
 	return out, nil
 }
-
-
-
-
-
-
 
 func (s *Store) CreateTradesBatch(ctx context.Context, trades []Trade) ([]Trade, error) {
 	if len(trades) == 0 {
@@ -313,10 +294,6 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 		secids[i], boards[i] = inst[0], inst[1]
 	}
 
-	
-	
-	
-	
 	const stmt = `
 		SELECT lp.secid, lp.board,
 		       CASE WHEN s.price_in_percent AND s.face_value IS NOT NULL
@@ -347,34 +324,13 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 	return out, rows.Err()
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-// OpeningMarker — часть external_id строк вводного остатка:
-// "<account_key>:opening:<YYYY-MM-DD>:...".
 const OpeningMarker = ":opening:"
 
-// OpeningScope — счёт брокера и начало периода отчёта, для вводного остатка.
 type OpeningScope struct {
 	AccountKey  string
 	PeriodStart time.Time
 }
 
-// applyOpening решает судьбу вводного остатка отчёта (в транзакции импорта):
-//   - вводные остатки этого счёта с датой позже начала периода удаляются —
-//     этот отчёт приносит настоящую историю за то время;
-//   - если по счёту уже есть строки раньше начала периода (более ранний
-//     отчёт), вводный остаток отчёта не нужен — его строки отбрасываются
-//     (попадают в skipped).
 func applyOpening(ctx context.Context, tx *sql.Tx, portfolioID string, scope OpeningScope,
 	trades []Trade, cash []CashOperation, res *ImportResult) ([]Trade, []CashOperation, error) {
 	accountPrefix := scope.AccountKey + ":"
@@ -428,11 +384,6 @@ func applyOpening(ctx context.Context, tx *sql.Tx, portfolioID string, scope Ope
 	return keptTrades, keptCash, nil
 }
 
-// ensureSecurities заводит в справочнике securities бумаги из отчёта,
-// которых там нет (фонд торгуется не в том режиме, что грузит price_updater,
-// бумага снята с торгов…): иначе FK trades → securities отклонит весь отчёт.
-// Существующие строки не трогает; цены у новой бумаги не будет, пока её
-// не обновит price_updater.
 func ensureSecurities(ctx context.Context, tx *sql.Tx, trades []Trade) error {
 	const stmt = `
 		INSERT INTO securities (secid, board, short_name, sec_name, isin, currency, price_in_percent)
@@ -447,7 +398,7 @@ func ensureSecurities(ctx context.Context, tx *sql.Tx, trades []Trade) error {
 		seen[key] = true
 		currency := t.Currency
 		if currency == "RUB" {
-			currency = "SUR" // как в справочнике MOEX
+			currency = "SUR"
 		}
 		bond := t.Board == "TQOB" || t.Board == "TQCB"
 		if _, err := tx.ExecContext(ctx, stmt, t.SecID, t.Board, t.SecurityName, t.ISIN, currency, bond); err != nil {

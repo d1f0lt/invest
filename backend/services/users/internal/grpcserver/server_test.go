@@ -434,15 +434,11 @@ func TestRefreshToken_ReuseAfterGracePeriodRevokesWholeFamily(t *testing.T) {
 	s := newTestServer(store)
 	login := loginTestUser(t, s, store)
 
-	
-	
 	rotated, err := s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if err != nil {
 		t.Fatalf("RefreshToken: %v", err)
 	}
 
-	
-	
 	store.setRevokedAt(login.RefreshToken, time.Now().Add(-2*reuseGracePeriod))
 	_, err = s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if status.Code(err) != codes.Unauthenticated {
@@ -465,8 +461,6 @@ func TestRefreshToken_ReuseWithinGracePeriodKeepsFamilyAlive(t *testing.T) {
 		t.Fatalf("RefreshToken: %v", err)
 	}
 
-	
-	
 	store.setRevokedAt(login.RefreshToken, time.Now())
 	_, err = s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: login.RefreshToken})
 	if status.Code(err) != codes.Unauthenticated {

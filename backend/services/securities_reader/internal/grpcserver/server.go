@@ -48,10 +48,8 @@ type Server struct {
 	Store Store
 	Log   *slog.Logger
 
-	
-	
 	Loc *time.Location
-	
+
 	Now func() time.Time
 
 	Moex MoexClient

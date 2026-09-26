@@ -37,6 +37,9 @@ service PortfolioService {
   rpc ListCashOperations(ListCashOperationsRequest) returns (ListCashOperationsResponse);
   rpc GetHoldings(GetHoldingsRequest) returns (GetHoldingsResponse);
   rpc GetPnL(GetPnLRequest) returns (PnLSummary);
+  // Portfolio value (securities at daily closes + cash) for each day of a
+  // period - the chart on the app's home screen. Added 2026-09-26.
+  rpc GetValueHistory(GetValueHistoryRequest) returns (ValueHistory);
 
   // Brokers whose reports can be imported (the "brokers" table). Shown in
   // the app's "Выберите брокера" list; CreateReportImport accepts only
@@ -226,6 +229,9 @@ message Holding {
   optional double current_price = 5;
   optional double market_value = 6;
   optional double unrealized_pnl = 7;
+  // Change of market_value since the previous trading day's close:
+  // quantity * (current_price - prev_close). Unset without both prices.
+  optional double day_change = 8;
 }
 
 message GetHoldingsResponse {
@@ -268,6 +274,34 @@ message PnLSummary {
   // Money on the account implied by the ledger: net deposits + every
   // cash flow of trades and cash operations.
   double cash_balance = 12;
+  // Sum of the holdings' day_change.
+  double total_day_change = 13;
+}
+
+message GetValueHistoryRequest {
+  string portfolio_id = 1;
+  // "week" | "month" | "year" | "all"; empty -> "all". Anything else is
+  // InvalidArgument. The period never starts before the first trade or
+  // cash operation.
+  string range = 2;
+}
+
+message ValuePoint {
+  // 00:00 Europe/Moscow of the day. The value is at the end of that day
+  // (the last point - right now, at current prices).
+  google.protobuf.Timestamp date = 1;
+  // Securities at the day's close (the last known close before it; bonds
+  // converted from % of face value) + cash on the account.
+  double value = 2;
+  // Deposits minus withdrawals up to the end of the day - value minus this
+  // is the profit at that point.
+  double net_deposits = 3;
+}
+
+message ValueHistory {
+  // Oldest first. One point per calendar day; periods longer than ~400
+  // days are thinned to one point per week (the last point is always kept).
+  repeated ValuePoint points = 1;
 }
 
 message Broker {

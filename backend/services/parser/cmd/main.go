@@ -1,10 +1,3 @@
-
-
-
-
-
-
-
 package main
 
 import (
@@ -79,9 +72,6 @@ func main() {
 	}
 	defer portfolio.Close()
 
-	
-	
-	
 	parsers := parsing.NewDispatcher()
 	parsers.Register(sber.BrokerKey, sber.Parser{})
 
@@ -91,8 +81,7 @@ func main() {
 		Portfolio: portfolio,
 		Log:       log,
 	}
-	
-	
+
 	go consumer.Run(ctx, "parser", w.Run)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
@@ -124,9 +113,6 @@ func main() {
 	}
 	log.Info("parser service stopped")
 }
-
-
-
 
 func runHealthcheckClient(addr string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

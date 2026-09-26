@@ -1,14 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
 package health
 
 import (
@@ -19,17 +8,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-
 type Probe func(ctx context.Context) error
-
 
 type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
 	Probe Probe
 }
-
-
-
 
 func (s *Server) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
 	if err := s.Probe(ctx); err != nil {
@@ -37,9 +21,6 @@ func (s *Server) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest
 	}
 	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
 }
-
-
-
 
 func (s *Server) Watch(_ *grpc_health_v1.HealthCheckRequest, _ grpc_health_v1.Health_WatchServer) error {
 	return status.Error(codes.Unimplemented, "watch is not implemented; call Check")

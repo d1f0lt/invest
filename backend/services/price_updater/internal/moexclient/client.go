@@ -32,9 +32,6 @@ type Security struct {
 	LotSize   int64
 	Decimals  int
 
-	
-	
-	
 	FaceValue      *float64
 	PriceInPercent bool
 }
@@ -69,19 +66,15 @@ type securitiesResponse struct {
 	Marketdata issTable `json:"marketdata"`
 }
 
-
-
-
 var bondBoards = map[string]bool{
-	"TQOB": true, 
-	"TQCB": true, 
-	"TQIR": true, 
-	"TQOD": true, 
-	"TQOE": true, 
-	"TQOY": true, 
-	"TQRD": true, 
+	"TQOB": true,
+	"TQCB": true,
+	"TQIR": true,
+	"TQOD": true,
+	"TQOE": true,
+	"TQOY": true,
+	"TQRD": true,
 }
-
 
 func MarketFor(board string) string {
 	if bondBoards[board] {
@@ -118,9 +111,6 @@ func (c *Client) FetchBoard(ctx context.Context, board string) (BoardSnapshot, e
 	secIdx := columnIndex(parsed.Securities.Columns)
 	mdIdx := columnIndex(parsed.Marketdata.Columns)
 
-	
-	
-	
 	prevPrice := map[string]*float64{}
 	prevClose := map[string]*float64{}
 

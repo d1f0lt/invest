@@ -1,21 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 package sber
 
 import (
@@ -39,25 +21,17 @@ import (
 	"invest/backend/services/parser/internal/task"
 )
 
-
-
 const BrokerKey = "sber"
-
-
 
 var ErrNotSberReport = errors.New("sber: file is not a Sberbank HTML broker report")
 
-
-
 var moscow = time.FixedZone("MSK", 3*60*60)
-
 
 type Parser struct{}
 
 func (Parser) Parse(_ task.ReportUploaded, data []byte) (parsing.Report, error) {
 	return Parse(data)
 }
-
 
 var (
 	headTrades    = normKey("Сделки купли/продажи ценных бумаг")
@@ -68,7 +42,6 @@ var (
 	headHoldings  = normKey("Портфель Ценных Бумаг")
 	headCashBal   = normKey("Денежные средства")
 )
-
 
 func Parse(data []byte) (parsing.Report, error) {
 	doc, err := html.Parse(bytes.NewReader(toUTF8(data)))
@@ -121,21 +94,16 @@ func Parse(data []byte) (parsing.Report, error) {
 	return report, nil
 }
 
-
-
-
 type row struct {
 	cells  []string
-	header bool 
+	header bool
 }
 
 type document struct {
-	hasTitle bool
-	account  string 
-	// Начало периода из заголовка «Отчет брокера за период с … по …».
+	hasTitle    bool
+	account     string
 	periodStart *time.Time
-	
-	
+
 	sections map[string][][]row
 }
 
@@ -180,7 +148,7 @@ func collect(root *html.Node) document {
 				return
 			case "table":
 				d.sections[current] = append(d.sections[current], readTable(n))
-				return 
+				return
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -244,9 +212,6 @@ func hasClass(n *html.Node, class string) bool {
 	return false
 }
 
-
-
-
 type columns map[string]int
 
 func headerOf(rows []row) (columns, bool) {
@@ -283,9 +248,6 @@ func (c columns) get(r row, name string) string {
 	return r.cells[i]
 }
 
-
-
-
 func dataRows(rows []row, width int) []row {
 	var out []row
 	for _, r := range rows {
@@ -300,19 +262,16 @@ func dataRows(rows []row, width int) []row {
 	return out
 }
 
-
-
-
 type security struct {
 	Name  string
-	Code  string 
+	Code  string
 	ISIN  string
-	Kind  string 
+	Kind  string
 	Board string
 }
 
 type reference struct {
-	byCode map[string]*security 
+	byCode map[string]*security
 	all    []*security
 }
 
@@ -350,10 +309,6 @@ func parseReference(tables [][]row) (*reference, error) {
 	return ref, nil
 }
 
-
-
-
-
 func boardFor(kind string) string {
 	k := strings.ToLower(kind)
 	switch {
@@ -385,9 +340,6 @@ func (r *reference) lookup(code, name string) (*security, error) {
 	return nil, fmt.Errorf("sber: security %q (%s) not found in the report's securities reference", name, code)
 }
 
-
-
-
 func (r *reference) findInText(s string) *security {
 	var best *security
 	for _, sec := range r.all {
@@ -397,8 +349,6 @@ func (r *reference) findInText(s string) *security {
 	}
 	return best
 }
-
-
 
 func containsWord(s, name string) bool {
 	for from := 0; ; {
@@ -417,9 +367,6 @@ func containsWord(s, name string) bool {
 		from = from + i + 1
 	}
 }
-
-
-
 
 func parseTrades(tables [][]row, ref *reference, account string) ([]parsing.Trade, error) {
 	var out []parsing.Trade
@@ -494,9 +441,7 @@ func parseTradeRow(cols columns, r row, ref *reference, account string) (parsing
 		Board:    sec.Board,
 		Side:     side,
 		Quantity: qty,
-		
-		
-		
+
 		Price:           round(nums["Сумма"]/qty, 6),
 		Fee:             round(nums["Комиссия Брокера"]+nums["Комиссия Биржи"], 2),
 		AccruedInterest: nums["НКД"],
@@ -507,9 +452,6 @@ func parseTradeRow(cols columns, r row, ref *reference, account string) (parsing
 		ISIN:            sec.ISIN,
 	}, nil
 }
-
-
-
 
 func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOperation, error) {
 	var out []parsing.CashOperation
@@ -558,12 +500,6 @@ func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOp
 				}
 			}
 
-			
-			
-			
-			
-			
-			
 			key := strings.Join([]string{account, date.Format("2006-01-02"), op.Currency, desc, strconv.FormatFloat(amount, 'f', 2, 64)}, "|")
 			n := seen[key]
 			seen[key]++
@@ -576,15 +512,6 @@ func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOp
 	return out, nil
 }
 
-
-
-
-
-// parseExternalPayouts разбирает «Выплаты дохода от эмитента на внешний счет»:
-// дивиденды/купоны, которые эмитент перечислил сразу на банковский счёт, минуя
-// брокерский. Это доход портфеля, но на брокерский счёт деньги не приходили,
-// поэтому каждая выплата даёт пару операций: доход (+) и вывод (−) на ту же
-// сумму. Так P&L видит доход, а остаток денег на счёте не меняется.
 func parseExternalPayouts(tables [][]row, ref *reference, account string) ([]parsing.CashOperation, error) {
 	var out []parsing.CashOperation
 	seen := map[string]int{}
@@ -650,16 +577,6 @@ func parseExternalPayouts(tables [][]row, ref *reference, account string) ([]par
 	return out, nil
 }
 
-// parseOpening превращает «Портфель Ценных Бумаг» (колонки «Начало периода»)
-// и «Денежные средства» (остаток на начало) во вводный остаток:
-//   - каждая бумага → покупка по рыночной стоимости на начало периода
-//     (себестоимости в отчёте нет), НКД — как при обычной покупке;
-//   - стоимость всех бумаг → одно пополнение ":securities" (деньги, которыми
-//     эти бумаги «оплачены», чтобы остаток денег не ушёл в минус);
-//   - деньги на начало периода → пополнение ":cash:<валюта>".
-//
-// Время — начало периода (00:00 МСК). Если на начало периода счёт пуст,
-// ничего не возвращает.
 func parseOpening(holdings, cashTables [][]row, ref *reference, accountKey string, start time.Time) ([]parsing.Trade, []parsing.CashOperation, error) {
 	prefix := accountKey + parsing.OpeningMarker + start.Format("2006-01-02") + ":"
 	dateText := start.Format("02.01.2006")
@@ -793,8 +710,6 @@ func parseOpening(holdings, cashTables [][]row, ref *reference, accountKey strin
 	return trades, cash, nil
 }
 
-// namedHeader — строка-заголовок таблицы, где первая ячейка = first
-// (у «Портфеля Ценных Бумаг» над ней есть ещё строка групп колонок).
 func namedHeader(rows []row, first string) (row, bool) {
 	for _, r := range rows {
 		if r.header && len(r.cells) > 0 && normKey(r.cells[0]) == normKey(first) {
@@ -804,8 +719,6 @@ func namedHeader(rows []row, first string) (row, bool) {
 	return row{}, false
 }
 
-// firstIndexes — индекс первой колонки с таким названием (названия
-// повторяются: «Количество, шт» есть у начала и у конца периода).
 func firstIndexes(cells []string) map[string]int {
 	idx := map[string]int{}
 	for i, c := range cells {
@@ -849,8 +762,7 @@ func classify(desc string, amount float64) (typ string, skip bool) {
 		strings.Contains(d, "пополнение"),
 		strings.Contains(d, ", qr"),
 		strings.Contains(d, "перевод"):
-		
-		
+
 		if amount > 0 {
 			return parsing.CashDeposit, false
 		}
@@ -858,9 +770,6 @@ func classify(desc string, amount float64) (typ string, skip bool) {
 	}
 	return parsing.CashOther, false
 }
-
-
-
 
 func parseDate(s string) (time.Time, error) {
 	t, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(s), moscow)
@@ -879,8 +788,6 @@ func parseDateTime(date, clock string) (time.Time, error) {
 }
 
 var numberCleaner = strings.NewReplacer(" ", "", " ", "", " ", "", ",", ".")
-
-
 
 func parseNumber(s string) (float64, error) {
 	s = numberCleaner.Replace(strings.TrimSpace(s))
@@ -904,8 +811,6 @@ func round(v float64, digits int) float64 {
 }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
-
-
 
 func normKey(s string) string {
 	var b strings.Builder
@@ -932,8 +837,6 @@ func isColumnNumber(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
 }
-
-
 
 func toUTF8(data []byte) []byte {
 	if utf8.Valid(data) {

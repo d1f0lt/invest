@@ -49,8 +49,6 @@ func (h *Handlers) handleListBrokers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-
-
 func handleBrokerIcon(w http.ResponseWriter, r *http.Request) {
 	name := path.Base(r.PathValue("file"))
 	data, err := fs.ReadFile(static.FS, "brokers/"+name)
@@ -61,7 +59,5 @@ func handleBrokerIcon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeContent(w, r, name, staticModTime, bytes.NewReader(data))
 }
-
-
 
 var staticModTime = time.Now()
