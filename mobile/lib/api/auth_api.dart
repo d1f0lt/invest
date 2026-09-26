@@ -100,6 +100,59 @@ class AuthApi {
     return UserProfile.fromJson(json! as Map<String, dynamic>);
   }
 
+  /// `PATCH /api/v1/me` — меняет email и/или логин (переданные поля).
+  Future<UserProfile> updateMe({String? email, String? username}) async {
+    try {
+      final json = await _client.patch('/api/v1/me', {
+        if (email != null) 'email': email.trim(),
+        if (username != null) 'username': username.trim(),
+      }, auth: true);
+      return UserProfile.fromJson(json! as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      throw switch ((e.statusCode, e.serverMessage)) {
+        (409, 'email already registered') =>
+          const ApiException('Этот email уже зарегистрирован', statusCode: 409),
+        (409, 'username already taken') =>
+          const ApiException('Этот логин уже занят', statusCode: 409),
+        (400, 'invalid email') => const ApiException('Некорректный email', statusCode: 400),
+        _ => e,
+      };
+    }
+  }
+
+  /// `POST /api/v1/me/password` — смена пароля. Сервер отзывает все сессии
+  /// и возвращает новую пару токенов для этого устройства.
+  Future<AuthTokens> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final json = await _client.post('/api/v1/me/password', {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }, auth: true);
+      return AuthTokens.fromJson(json! as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      throw switch (e.statusCode) {
+        403 => const ApiException('Неверный текущий пароль', statusCode: 403),
+        400 => const ApiException('Новый пароль слишком короткий', statusCode: 400),
+        _ => e,
+      };
+    }
+  }
+
+  /// `DELETE /api/v1/me` — удаление аккаунта с подтверждением паролем.
+  Future<void> deleteMe(String password) async {
+    try {
+      await _client.delete('/api/v1/me', body: {'password': password}, auth: true);
+    } on ApiException catch (e) {
+      if (e.statusCode == 403) {
+        throw const ApiException('Неверный пароль', statusCode: 403);
+      }
+      rethrow;
+    }
+  }
+
   /// `POST /api/v1/logout` — отзывает refresh-токен.
   Future<void> logout(String refreshToken) =>
       _client.post('/api/v1/logout', {'refresh_token': refreshToken});

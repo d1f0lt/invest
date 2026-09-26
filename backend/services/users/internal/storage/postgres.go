@@ -83,16 +83,23 @@ func (s *Store) CreateUser(ctx context.Context, email string, username *string, 
 		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == postgresUniqueViolation {
-			if pqErr.Constraint == "idx_users_username_lower" {
-				return User{}, ErrUsernameTaken
-			}
-			return User{}, ErrEmailTaken
+		if uerr := uniqueViolation(err); uerr != nil {
+			return User{}, uerr
 		}
 		return User{}, fmt.Errorf("insert user: %w", err)
 	}
 	return u, nil
+}
+
+func uniqueViolation(err error) error {
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) || pqErr.Code != postgresUniqueViolation {
+		return nil
+	}
+	if pqErr.Constraint == "idx_users_username_lower" {
+		return ErrUsernameTaken
+	}
+	return ErrEmailTaken
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -129,6 +136,86 @@ func (s *Store) GetUserByEmailWithPassword(ctx context.Context, email string) (U
 		return User{}, fmt.Errorf("select user by email: %w", err)
 	}
 	return u, nil
+}
+
+func (s *Store) GetUserByIDWithPassword(ctx context.Context, id string) (User, error) {
+	const stmt = `
+		SELECT id, email, username, password_hash, is_active, created_at, updated_at, last_login_at
+		FROM users WHERE id = $1
+	`
+	var u User
+	err := s.db.QueryRowContext(ctx, stmt, id).Scan(
+		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("select user with password by id: %w", err)
+	}
+	return u, nil
+}
+
+func (s *Store) UpdateProfile(ctx context.Context, id, email string, username *string) (User, error) {
+	const stmt = `
+		UPDATE users SET email = $2, username = $3, updated_at = now()
+		WHERE id = $1
+		RETURNING id, email, username, is_active, created_at, updated_at, last_login_at
+	`
+	var u User
+	err := s.db.QueryRowContext(ctx, stmt, id, email, username).Scan(
+		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		if uerr := uniqueViolation(err); uerr != nil {
+			return User{}, uerr
+		}
+		return User{}, fmt.Errorf("update profile: %w", err)
+	}
+	return u, nil
+}
+
+func (s *Store) UpdatePasswordHash(ctx context.Context, id, passwordHash string) error {
+	const stmt = `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`
+	res, err := s.db.ExecContext(ctx, stmt, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update password hash: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update password hash: rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RevokeUserRefreshTokens(ctx context.Context, userID string) error {
+	const stmt = `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`
+	if _, err := s.db.ExecContext(ctx, stmt, userID); err != nil {
+		return fmt.Errorf("revoke user refresh tokens: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	const stmt = `DELETE FROM users WHERE id = $1`
+	res, err := s.db.ExecContext(ctx, stmt, id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete user: rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) TouchLastLogin(ctx context.Context, id string) error {

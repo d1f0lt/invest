@@ -40,6 +40,9 @@ class ApiClient {
 
   Future<Object?> get(String path, {bool auth = false}) => _send('GET', path, auth: auth);
 
+  Future<Object?> delete(String path, {Map<String, dynamic>? body, bool auth = false}) =>
+      _send('DELETE', path, body: body, auth: auth);
+
   /// `multipart/form-data`: текстовые поля + один файл (загрузка отчёта).
   Future<Object?> postMultipart(
     String path, {
@@ -177,6 +180,7 @@ class ApiClient {
   static String _describeStatus(int code) => switch (code) {
         400 => 'Проверьте введённые данные',
         401 => 'Требуется вход',
+        403 => 'Недостаточно прав',
         404 => 'Не найдено',
         409 => 'Уже существует',
         413 => 'Файл слишком большой',
