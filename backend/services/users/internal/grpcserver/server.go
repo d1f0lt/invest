@@ -28,6 +28,11 @@ type Store interface {
 	ClaimRefreshToken(ctx context.Context, id string) (bool, error)
 	RevokeRefreshTokenFamily(ctx context.Context, familyID string) error
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
+	GetUserByIDWithPassword(ctx context.Context, id string) (storage.User, error)
+	UpdateProfile(ctx context.Context, id, email string, username *string) (storage.User, error)
+	UpdatePasswordHash(ctx context.Context, id, passwordHash string) error
+	RevokeUserRefreshTokens(ctx context.Context, userID string) error
+	DeleteUser(ctx context.Context, id string) error
 }
 
 type Server struct {
@@ -229,6 +234,113 @@ func (s *Server) GetUser(ctx context.Context, req *userspb.GetUserRequest) (*use
 		return nil, err
 	}
 	return s.respondWithUser(ctx, req.GetId())
+}
+
+func (s *Server) UpdateMe(ctx context.Context, req *userspb.UpdateMeRequest) (*userspb.User, error) {
+	userID, err := auth.UserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	current, err := s.Store.GetUserByID(ctx, userID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, status.Error(codes.NotFound, "user not found")
+	}
+	if err != nil {
+		s.Log.Error("get user by id", "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	email := current.Email
+	if req.Email != nil {
+		email = strings.ToLower(strings.TrimSpace(req.GetEmail()))
+		if !emailRE.MatchString(email) {
+			return nil, status.Error(codes.InvalidArgument, "invalid email")
+		}
+	}
+
+	username := current.Username
+	if req.Username != nil {
+		username = nil
+		if trimmed := strings.TrimSpace(req.GetUsername()); trimmed != "" {
+			username = &trimmed
+		}
+	}
+
+	user, err := s.Store.UpdateProfile(ctx, userID, email, username)
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		return nil, status.Error(codes.NotFound, "user not found")
+	case errors.Is(err, storage.ErrEmailTaken):
+		return nil, status.Error(codes.AlreadyExists, "email already registered")
+	case errors.Is(err, storage.ErrUsernameTaken):
+		return nil, status.Error(codes.AlreadyExists, "username already taken")
+	case err != nil:
+		s.Log.Error("update profile", "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	return toUserPB(user), nil
+}
+
+func (s *Server) ChangePassword(ctx context.Context, req *userspb.ChangePasswordRequest) (*userspb.LoginResponse, error) {
+	user, err := s.verifiedCaller(ctx, req.GetCurrentPassword())
+	if err != nil {
+		return nil, err
+	}
+	if len(req.GetNewPassword()) < minPasswordLength {
+		return nil, status.Error(codes.InvalidArgument, "password must be at least 8 characters")
+	}
+
+	hash, err := auth.HashPassword(req.GetNewPassword(), s.BcryptCost)
+	if err != nil {
+		s.Log.Error("hash password", "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	if err := s.Store.UpdatePasswordHash(ctx, user.ID, hash); err != nil {
+		s.Log.Error("update password hash", "error", err, "user_id", user.ID)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	if err := s.Store.RevokeUserRefreshTokens(ctx, user.ID); err != nil {
+		s.Log.Error("revoke user refresh tokens", "error", err, "user_id", user.ID)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	return s.issueTokenPair(ctx, user.ID, "")
+}
+
+func (s *Server) DeleteMe(ctx context.Context, req *userspb.DeleteMeRequest) (*emptypb.Empty, error) {
+	user, err := s.verifiedCaller(ctx, req.GetPassword())
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.Store.DeleteUser(ctx, user.ID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		s.Log.Error("delete user", "error", err, "user_id", user.ID)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	s.Log.Info("user deleted", "user_id", user.ID)
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) verifiedCaller(ctx context.Context, password string) (storage.User, error) {
+	userID, err := auth.UserID(ctx)
+	if err != nil {
+		return storage.User{}, err
+	}
+
+	user, err := s.Store.GetUserByIDWithPassword(ctx, userID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return storage.User{}, status.Error(codes.NotFound, "user not found")
+	}
+	if err != nil {
+		s.Log.Error("get user with password by id", "error", err)
+		return storage.User{}, status.Error(codes.Internal, "internal error")
+	}
+	if !auth.VerifyPassword(user.PasswordHash, password) {
+		return storage.User{}, status.Error(codes.PermissionDenied, "wrong password")
+	}
+	return user, nil
 }
 
 func (s *Server) respondWithUser(ctx context.Context, id string) (*userspb.User, error) {

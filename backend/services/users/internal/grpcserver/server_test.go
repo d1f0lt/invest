@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -119,6 +120,78 @@ func (f *fakeStore) RevokeRefreshTokenByHash(_ context.Context, tokenHash string
 		now := time.Now()
 		rt.RevokedAt = &now
 		f.refreshTokens[tokenHash] = rt
+	}
+	return nil
+}
+
+func (f *fakeStore) GetUserByIDWithPassword(ctx context.Context, id string) (storage.User, error) {
+	return f.GetUserByID(ctx, id)
+}
+
+func (f *fakeStore) UpdateProfile(_ context.Context, id, email string, username *string) (storage.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byID[id]
+	if !ok {
+		return storage.User{}, storage.ErrNotFound
+	}
+	if other, taken := f.byEmail[email]; taken && other.ID != id {
+		return storage.User{}, storage.ErrEmailTaken
+	}
+	if username != nil {
+		for _, other := range f.byID {
+			if other.ID != id && other.Username != nil && strings.EqualFold(*other.Username, *username) {
+				return storage.User{}, storage.ErrUsernameTaken
+			}
+		}
+	}
+	delete(f.byEmail, u.Email)
+	u.Email = email
+	u.Username = username
+	f.byID[id] = u
+	f.byEmail[email] = u
+	return u, nil
+}
+
+func (f *fakeStore) UpdatePasswordHash(_ context.Context, id, passwordHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byID[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	u.PasswordHash = passwordHash
+	f.byID[id] = u
+	f.byEmail[u.Email] = u
+	return nil
+}
+
+func (f *fakeStore) RevokeUserRefreshTokens(_ context.Context, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now()
+	for hash, rt := range f.refreshTokens {
+		if rt.UserID == userID && rt.RevokedAt == nil {
+			rt.RevokedAt = &now
+			f.refreshTokens[hash] = rt
+		}
+	}
+	return nil
+}
+
+func (f *fakeStore) DeleteUser(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byID[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	delete(f.byID, id)
+	delete(f.byEmail, u.Email)
+	for hash, rt := range f.refreshTokens {
+		if rt.UserID == id {
+			delete(f.refreshTokens, hash)
+		}
 	}
 	return nil
 }
@@ -498,4 +571,158 @@ func TestRefreshToken_RotatedTokensShareFamily(t *testing.T) {
 	if got := store.refreshTokens[auth.HashRefreshToken(resp2.RefreshToken)].UserID; got != "u1" {
 		t.Errorf("rotated token user = %q, want u1", got)
 	}
+}
+
+func registerUser(t *testing.T, s *Server, email, username, password string) *userspb.User {
+	t.Helper()
+	u, err := s.Register(context.Background(), &userspb.RegisterRequest{Email: email, Username: &username, Password: password})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	return u
+}
+
+func TestUpdateMe_RequiresMetadata(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	_, err := s.UpdateMe(context.Background(), &userspb.UpdateMeRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated", status.Code(err))
+	}
+}
+
+func TestUpdateMe_ChangesOnlyProvidedFields(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	newName := "  alice2 "
+	got, err := s.UpdateMe(withUserID(u.Id), &userspb.UpdateMeRequest{Username: &newName})
+	if err != nil {
+		t.Fatalf("UpdateMe: %v", err)
+	}
+	if got.GetUsername() != "alice2" || got.GetEmail() != "a@example.com" {
+		t.Fatalf("got %+v, want username alice2 and unchanged email", got)
+	}
+
+	newEmail := " B@Example.com "
+	got, err = s.UpdateMe(withUserID(u.Id), &userspb.UpdateMeRequest{Email: &newEmail})
+	if err != nil {
+		t.Fatalf("UpdateMe: %v", err)
+	}
+	if got.GetEmail() != "b@example.com" || got.GetUsername() != "alice2" {
+		t.Fatalf("got %+v, want email b@example.com and unchanged username", got)
+	}
+
+	if _, err := s.Login(context.Background(), &userspb.LoginRequest{Email: "b@example.com", Password: "password123"}); err != nil {
+		t.Fatalf("Login with new email: %v", err)
+	}
+}
+
+func TestUpdateMe_RejectsInvalidEmail(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	bad := "not-an-email"
+	_, err := s.UpdateMe(withUserID(u.Id), &userspb.UpdateMeRequest{Email: &bad})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+func TestUpdateMe_ConflictsWithOtherAccounts(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	registerUser(t, s, "a@example.com", "alice", "password123")
+	u := registerUser(t, s, "b@example.com", "bob", "password123")
+
+	taken := "a@example.com"
+	_, err := s.UpdateMe(withUserID(u.Id), &userspb.UpdateMeRequest{Email: &taken})
+	if status.Code(err) != codes.AlreadyExists || status.Convert(err).Message() != "email already registered" {
+		t.Fatalf("email conflict: err = %v", err)
+	}
+
+	takenName := "ALICE"
+	_, err = s.UpdateMe(withUserID(u.Id), &userspb.UpdateMeRequest{Username: &takenName})
+	if status.Code(err) != codes.AlreadyExists || status.Convert(err).Message() != "username already taken" {
+		t.Fatalf("username conflict: err = %v", err)
+	}
+}
+
+func TestChangePassword_WrongCurrentPassword(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	_, err := s.ChangePassword(withUserID(u.Id), &userspb.ChangePasswordRequest{CurrentPassword: "nope", NewPassword: "newpassword1"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+}
+
+func TestChangePassword_RejectsShortPassword(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	_, err := s.ChangePassword(withUserID(u.Id), &userspb.ChangePasswordRequest{CurrentPassword: "password123", NewPassword: "short"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+func TestChangePassword_RotatesCredentialsAndSessions(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	old, err := s.Login(context.Background(), &userspb.LoginRequest{Email: "a@example.com", Password: "password123"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	fresh, err := s.ChangePassword(withUserID(u.Id), &userspb.ChangePasswordRequest{CurrentPassword: "password123", NewPassword: "newpassword1"})
+	if err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if fresh.GetAccessToken() == "" || fresh.GetRefreshToken() == "" {
+		t.Fatalf("expected a fresh token pair, got %+v", fresh)
+	}
+
+	if _, err := s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: old.GetRefreshToken()}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("old refresh token: code = %v, want Unauthenticated", status.Code(err))
+	}
+	if _, err := s.RefreshToken(context.Background(), &userspb.RefreshTokenRequest{RefreshToken: fresh.GetRefreshToken()}); err != nil {
+		t.Fatalf("fresh refresh token: %v", err)
+	}
+
+	if _, err := s.Login(context.Background(), &userspb.LoginRequest{Email: "a@example.com", Password: "password123"}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("old password: code = %v, want Unauthenticated", status.Code(err))
+	}
+	if _, err := s.Login(context.Background(), &userspb.LoginRequest{Email: "a@example.com", Password: "newpassword1"}); err != nil {
+		t.Fatalf("new password: %v", err)
+	}
+}
+
+func TestDeleteMe_WrongPassword(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	_, err := s.DeleteMe(withUserID(u.Id), &userspb.DeleteMeRequest{Password: "nope"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+	if _, err := s.GetMe(withUserID(u.Id), &emptypb.Empty{}); err != nil {
+		t.Fatalf("account must survive a failed delete: %v", err)
+	}
+}
+
+func TestDeleteMe_RemovesAccount(t *testing.T) {
+	s := newTestServer(newFakeStore())
+	u := registerUser(t, s, "a@example.com", "alice", "password123")
+
+	if _, err := s.DeleteMe(withUserID(u.Id), &userspb.DeleteMeRequest{Password: "password123"}); err != nil {
+		t.Fatalf("DeleteMe: %v", err)
+	}
+	if _, err := s.GetMe(withUserID(u.Id), &emptypb.Empty{}); status.Code(err) != codes.NotFound {
+		t.Fatalf("GetMe after delete: code = %v, want NotFound", status.Code(err))
+	}
+	if _, err := s.Login(context.Background(), &userspb.LoginRequest{Email: "a@example.com", Password: "password123"}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("Login after delete: code = %v, want Unauthenticated", status.Code(err))
+	}
+	registerUser(t, s, "a@example.com", "alice", "password123")
 }

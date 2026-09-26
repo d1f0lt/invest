@@ -29,6 +29,20 @@ type logoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type updateMeRequest struct {
+	Email    *string `json:"email,omitempty"`
+	Username *string `json:"username,omitempty"`
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+type deleteMeRequest struct {
+	Password string `json:"password"`
+}
+
 type loginResponse struct {
 	AccessToken           string    `json:"access_token"`
 	ExpiresAt             time.Time `json:"expires_at"`
@@ -173,4 +187,68 @@ func (h *Handlers) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toUserResponse(user))
+}
+
+func (h *Handlers) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	var req updateMeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	userID, _ := userIDFromContext(r.Context())
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+	ctx = auth.WithUserID(ctx, userID)
+
+	user, err := h.Upstream.Users.UpdateMe(ctx, &userspb.UpdateMeRequest{
+		Email:    req.Email,
+		Username: req.Username,
+	})
+	if err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toUserResponse(user))
+}
+
+func (h *Handlers) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req changePasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	userID, _ := userIDFromContext(r.Context())
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+	ctx = auth.WithUserID(ctx, userID)
+
+	resp, err := h.Upstream.Users.ChangePassword(ctx, &userspb.ChangePasswordRequest{
+		CurrentPassword: req.CurrentPassword,
+		NewPassword:     req.NewPassword,
+	})
+	if err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toLoginResponse(resp))
+}
+
+func (h *Handlers) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
+	var req deleteMeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	userID, _ := userIDFromContext(r.Context())
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+	ctx = auth.WithUserID(ctx, userID)
+
+	if _, err := h.Upstream.Users.DeleteMe(ctx, &userspb.DeleteMeRequest{
+		Password: req.Password,
+	}); err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

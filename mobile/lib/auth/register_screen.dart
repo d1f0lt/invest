@@ -25,8 +25,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _api = AuthApi();
   bool _loading = false;
 
-  static final _loginRe = RegExp(r'^[a-zA-Z0-9_.]+$');
-
   @override
   void dispose() {
     _email.dispose();
@@ -34,21 +32,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _password.dispose();
     _repeat.dispose();
     super.dispose();
-  }
-
-  String? _validateLogin(String? v) {
-    final value = v?.trim() ?? '';
-    if (value.isEmpty) return 'Заполните поле';
-    if (value.length < 3) return 'Минимум 3 символа';
-    if (!_loginRe.hasMatch(value)) return 'Только латиница, цифры, «_» и «.»';
-    return null;
-  }
-
-  String? _validatePassword(String? v) {
-    final value = v ?? '';
-    if (value.isEmpty) return 'Заполните поле';
-    if (value.length < 8) return 'Минимум 8 символов';
-    return null;
   }
 
   String? _validateRepeat(String? v) {
@@ -108,7 +91,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 label: 'Логин',
                 icon: Icons.person_outline,
                 autofillHints: const [AutofillHints.newUsername],
-                validator: _validateLogin,
+                validator: validateLogin,
               ),
               const SizedBox(height: 16),
               AuthTextField(
@@ -117,7 +100,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 icon: Icons.lock_outline,
                 obscure: true,
                 autofillHints: const [AutofillHints.newPassword],
-                validator: _validatePassword,
+                validator: validatePassword,
               ),
               const SizedBox(height: 16),
               AuthTextField(
