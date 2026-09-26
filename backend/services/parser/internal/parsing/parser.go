@@ -33,6 +33,11 @@ type Trade struct {
 	
 	
 	ExternalID string
+
+	// Название и ISIN из отчёта — чтобы portfolio мог завести бумагу в
+	// справочнике, если биржа о ней не знает.
+	SecurityName string
+	ISIN         string
 }
 
 
@@ -67,7 +72,21 @@ type CashOperation struct {
 type Report struct {
 	Trades         []Trade
 	CashOperations []CashOperation
+
+	// AccountKey — общий префикс ExternalID всех строк отчёта
+	// ("sber:<счёт>"), PeriodStart — начало периода отчёта. Нужны portfolio,
+	// чтобы решить, применять ли вводный остаток (см. OpeningMarker).
+	AccountKey  string
+	PeriodStart *time.Time
 }
+
+// OpeningMarker — часть ExternalID строк «вводного остатка»:
+// "<AccountKey>:opening:<YYYY-MM-DD>:...". Это бумаги и деньги, которые
+// лежали на счёте на начало периода отчёта (куплены/внесены раньше):
+// бумаги — покупки по рыночной цене на начало периода, деньги — пополнения.
+// portfolio применяет их, только если по счёту нет более ранней истории.
+const OpeningMarker = ":opening:"
+
 
 func (r Report) Empty() bool { return len(r.Trades) == 0 && len(r.CashOperations) == 0 }
 

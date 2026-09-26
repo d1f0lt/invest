@@ -137,6 +137,13 @@ message TradeInput {
   // Stable id of the trade in the broker's records (e.g. deal number).
   // Unique per portfolio when set; empty = no deduplication.
   string external_id = 10;
+  // Report import only: the instrument's name and ISIN from the broker
+  // report. If (secid, board) isn't in the securities directory yet (fund
+  // not traded on the board price_updater loads, delisted...), a row is
+  // added with these so the import doesn't fail; it just has no price
+  // until price_updater (if ever) fills it in.
+  string security_name = 11;
+  string isin = 12;
 }
 
 // Cash operation types: "deposit", "withdrawal", "dividend", "coupon",
@@ -172,6 +179,16 @@ message ImportReportRequest {
   // Optional: the import this report belongs to. When set, it is marked
   // done (with the counts below) in the same transaction as the rows.
   string report_import_id = 4;
+  // Broker account the report is for: the common prefix of its rows'
+  // external_ids, e.g. "sber:S24RH4S". Optional; needed for opening balances.
+  string account_key = 5;
+  // Start of the report period. Rows whose external_id starts with
+  // "<account_key>:opening:" are the opening balance - securities and cash
+  // held at period_start that were bought/deposited before the report.
+  // They are imported only if the portfolio has no earlier rows of this
+  // account; opening rows of this account dated after period_start are
+  // deleted (this report brings the real history for that time).
+  google.protobuf.Timestamp period_start = 6;
 }
 
 message ImportReportResponse {

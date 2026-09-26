@@ -116,7 +116,7 @@ func (f *fakeStore) ListTrades(_ context.Context, portfolioID string) ([]storage
 
 
 
-func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error) {
+func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, _ *storage.OpeningScope) (storage.ImportResult, error) {
 	var res storage.ImportResult
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {

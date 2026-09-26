@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 class TabPlaceholder extends StatelessWidget {
   const TabPlaceholder({
     super.key,
-    required this.title,
+    required this.appBar,
     required this.icon,
     required this.text,
   });
 
-  final String title;
+  final PreferredSizeWidget appBar;
   final IconData icon;
   final String text;
 
@@ -17,7 +17,7 @@ class TabPlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: appBar,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
