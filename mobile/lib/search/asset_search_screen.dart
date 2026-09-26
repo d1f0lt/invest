@@ -10,7 +10,11 @@ import '../securities/security_widgets.dart';
 /// Экран «Поиск активов»: пока ничего не введено — пусто, дальше —
 /// бумаги, найденные сервером (securities_reader) по тикеру, названию или ISIN.
 class AssetSearchScreen extends StatefulWidget {
-  const AssetSearchScreen({super.key});
+  const AssetSearchScreen({super.key, this.pick = false});
+
+  /// Режим выбора: тап по бумаге возвращает её через `Navigator.pop`
+  /// вместо перехода в карточку (например, для нового уведомления).
+  final bool pick;
 
   @override
   State<AssetSearchScreen> createState() => _AssetSearchScreenState();
@@ -97,6 +101,10 @@ class _AssetSearchScreenState extends State<AssetSearchScreen> {
   }
 
   void _open(Security s) {
+    if (widget.pick) {
+      Navigator.of(context).pop(s);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => AssetScreen(security: s)),
     );
@@ -106,7 +114,7 @@ class _AssetSearchScreenState extends State<AssetSearchScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Поиск активов')),
+      appBar: AppBar(title: Text(widget.pick ? 'Выбор бумаги' : 'Поиск активов')),
       body: Column(
         children: [
           Padding(
