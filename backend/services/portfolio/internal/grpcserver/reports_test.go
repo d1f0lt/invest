@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -49,10 +50,10 @@ func (f *fakeStore) GetReportImport(_ context.Context, id string) (storage.Repor
 	return r, nil
 }
 
-func (f *fakeStore) ListReportImports(_ context.Context, portfolioID string) ([]storage.ReportImport, error) {
+func (f *fakeStore) ListReportImports(_ context.Context, portfolioIDs []string) ([]storage.ReportImport, error) {
 	var out []storage.ReportImport
 	for _, r := range f.imports {
-		if r.PortfolioID == portfolioID {
+		if slices.Contains(portfolioIDs, r.PortfolioID) {
 			out = append(out, r)
 		}
 	}

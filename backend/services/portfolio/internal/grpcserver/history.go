@@ -54,20 +54,22 @@ func (s *Server) GetValueHistory(ctx context.Context, req *portfoliopb.GetValueH
 		return nil, status.Error(codes.InvalidArgument, "range must be one of: week, month, year, all")
 	}
 
-	l, err := s.loadLedger(ctx, req.GetPortfolioId())
+	b, err := s.loadBook(ctx, req.GetPortfolioId())
 	if err != nil {
 		return nil, err
 	}
 
 	var first time.Time
-	for _, t := range l.trades {
-		if first.IsZero() || t.ExecutedAt.Before(first) {
-			first = t.ExecutedAt
+	for _, l := range b.ledgers {
+		for _, t := range l.trades {
+			if first.IsZero() || t.ExecutedAt.Before(first) {
+				first = t.ExecutedAt
+			}
 		}
-	}
-	for _, c := range l.cash {
-		if first.IsZero() || c.OccurredAt.Before(first) {
-			first = c.OccurredAt
+		for _, c := range l.cash {
+			if first.IsZero() || c.OccurredAt.Before(first) {
+				first = c.OccurredAt
+			}
 		}
 	}
 	if first.IsZero() {
@@ -79,7 +81,7 @@ func (s *Server) GetValueHistory(ctx context.Context, req *portfoliopb.GetValueH
 
 	loc := s.location()
 	days := pnl.HistoryDays(from, now, loc, maxDailyPoints)
-	closes, err := s.Store.DailyCloses(ctx, l.instruments, days[0].Add(-closesLookback))
+	closes, err := s.Store.DailyCloses(ctx, b.instruments, days[0].Add(-closesLookback))
 	if err != nil {
 		s.Log.Error("daily closes", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")
@@ -94,7 +96,11 @@ func (s *Server) GetValueHistory(ctx context.Context, req *portfoliopb.GetValueH
 		byKey[key] = converted
 	}
 
-	points := pnl.ValueHistory(l.trades, l.cash, byKey, l.prices, days, now)
+	histories := make([][]pnl.ValuePoint, 0, len(b.ledgers))
+	for _, l := range b.ledgers {
+		histories = append(histories, pnl.ValueHistory(l.trades, l.cash, byKey, b.prices, days, now))
+	}
+	points := pnl.MergeValueHistory(histories)
 	out := &portfoliopb.ValueHistory{Points: make([]*portfoliopb.ValuePoint, 0, len(points))}
 	for _, p := range points {
 		out.Points = append(out.Points, &portfoliopb.ValuePoint{

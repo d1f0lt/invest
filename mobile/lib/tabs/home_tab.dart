@@ -262,8 +262,8 @@ class _Summary extends StatelessWidget {
         _MetricRow(
           label: 'Пассивный доход',
           child: Text(
-            '${_unsigned(formatPercent(stats.passivePercent), stats.passivePercent)}   '
-            '${_unsigned(formatMoney(stats.passiveIncome), stats.passiveIncome)}',
+            '${_unsigned(formatMoney(stats.passiveIncome), stats.passiveIncome)}   '
+            '${_unsigned(formatPercent(stats.passivePercent), stats.passivePercent)}',
             style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
           ),
         ),

@@ -12,7 +12,8 @@ import (
 )
 
 type createPortfolioRequest struct {
-	Name string `json:"name,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	MemberIDs []string `json:"member_ids,omitempty"`
 }
 
 type updatePortfolioRequest struct {
@@ -24,6 +25,7 @@ type portfolioResponse struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	MemberIDs []string  `json:"member_ids,omitempty"`
 }
 
 func toPortfolioResponse(p *portfoliopb.Portfolio) portfolioResponse {
@@ -32,6 +34,7 @@ func toPortfolioResponse(p *portfoliopb.Portfolio) portfolioResponse {
 		Name:      p.GetName(),
 		CreatedAt: p.GetCreatedAt().AsTime(),
 		UpdatedAt: p.GetUpdatedAt().AsTime(),
+		MemberIDs: p.GetMemberIds(),
 	}
 }
 
@@ -178,7 +181,10 @@ func (h *Handlers) handleCreatePortfolio(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	p, err := h.Upstream.Portfolio.CreatePortfolio(ctx, &portfoliopb.CreatePortfolioRequest{Name: req.Name})
+	p, err := h.Upstream.Portfolio.CreatePortfolio(ctx, &portfoliopb.CreatePortfolioRequest{
+		Name:      req.Name,
+		MemberIds: req.MemberIDs,
+	})
 	if err != nil {
 		writeUpstreamError(w, h.Log, err)
 		return

@@ -52,8 +52,8 @@ func (f *fakeStore) genID(prefix string) string {
 	return prefix + "-" + time.Now().Format("150405") + "-" + string(rune('a'+f.nextID))
 }
 
-func (f *fakeStore) CreatePortfolio(_ context.Context, userID, name string) (storage.Portfolio, error) {
-	p := storage.Portfolio{ID: f.genID("p"), UserID: userID, Name: name, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+func (f *fakeStore) CreatePortfolio(_ context.Context, userID, name string, memberIDs []string) (storage.Portfolio, error) {
+	p := storage.Portfolio{ID: f.genID("p"), UserID: userID, Name: name, CreatedAt: time.Now(), UpdatedAt: time.Now(), MemberIDs: memberIDs}
 	f.portfolios[p.ID] = p
 	return p, nil
 }
@@ -112,8 +112,12 @@ func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade)
 	return created, nil
 }
 
-func (f *fakeStore) ListTrades(_ context.Context, portfolioID string) ([]storage.Trade, error) {
-	return f.trades[portfolioID], nil
+func (f *fakeStore) ListTrades(_ context.Context, portfolioIDs []string) ([]storage.Trade, error) {
+	var out []storage.Trade
+	for _, id := range portfolioIDs {
+		out = append(out, f.trades[id]...)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, _ *storage.OpeningScope) (storage.ImportResult, error) {
@@ -160,8 +164,12 @@ func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string
 	return res, nil
 }
 
-func (f *fakeStore) ListCashOperations(_ context.Context, portfolioID string) ([]storage.CashOperation, error) {
-	return f.cash[portfolioID], nil
+func (f *fakeStore) ListCashOperations(_ context.Context, portfolioIDs []string) ([]storage.CashOperation, error) {
+	var out []storage.CashOperation
+	for _, id := range portfolioIDs {
+		out = append(out, f.cash[id]...)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) PrevCloses(_ context.Context, instruments [][2]string) (map[string]float64, error) {

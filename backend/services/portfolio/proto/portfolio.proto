@@ -13,6 +13,7 @@ import "google/protobuf/empty.proto";
 // verification) - the service trusts it unconditionally, same model as
 // the old X-User-ID HTTP header (see internal/authmd).
 service PortfolioService {
+  // Creates an ordinary portfolio, or a composite one (see member_ids).
   rpc CreatePortfolio(CreatePortfolioRequest) returns (Portfolio);
   rpc ListPortfolios(google.protobuf.Empty) returns (ListPortfoliosResponse);
   rpc GetPortfolio(GetPortfolioRequest) returns (Portfolio);
@@ -66,7 +67,16 @@ service PortfolioService {
 }
 
 message CreatePortfolioRequest {
-  string name = 1; // empty -> server defaults to "Основной"
+  // empty -> server defaults to "Основной" ("Составной" with member_ids)
+  string name = 1;
+  // Composite portfolio (added 2026-09-26): ids of at least 2 distinct
+  // ordinary portfolios of the caller. A composite portfolio has no trades
+  // of its own - holdings, P&L, value history, trades, cash operations and
+  // report imports are those of its members together. It is read-only:
+  // CreateTrade(s), ImportReport and CreateReportImport on it fail with
+  // FailedPrecondition. Unknown / someone else's member - NotFound; fewer
+  // than 2 members or a composite member - InvalidArgument.
+  repeated string member_ids = 2;
 }
 
 message Portfolio {
@@ -74,6 +84,9 @@ message Portfolio {
   string name = 2;
   google.protobuf.Timestamp created_at = 3;
   google.protobuf.Timestamp updated_at = 4;
+  // Non-empty - a composite portfolio built from these portfolios, in the
+  // order they were given on creation.
+  repeated string member_ids = 5;
 }
 
 message ListPortfoliosResponse {
