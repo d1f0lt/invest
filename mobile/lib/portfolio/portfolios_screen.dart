@@ -159,7 +159,8 @@ class PortfolioCard extends StatelessWidget {
 
   final Portfolio portfolio;
 
-  /// Для составного портфеля — из чего он собран (подпись под названием).
+  /// Для составного портфеля — из чего он собран (подпись под названием;
+  /// у обычного подпись «Обычный»).
   final List<Portfolio> members;
   final PortfolioStats stats;
   final bool selected;
@@ -205,16 +206,17 @@ class PortfolioCard extends StatelessWidget {
                               .titleMedium
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
-                        if (portfolio.isComposite)
-                          Text(
-                            compositeSubtitle(portfolio, members),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                          ),
+                        Text(
+                          portfolio.isComposite
+                              ? compositeSubtitle(portfolio, members)
+                              : 'Обычный',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
                       ],
                     ),
                   ),
