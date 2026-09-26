@@ -132,11 +132,11 @@ func (s *Store) GetReportImport(ctx context.Context, id string) (ReportImport, e
 	return r, nil
 }
 
-func (s *Store) ListReportImports(ctx context.Context, portfolioID string) ([]ReportImport, error) {
+func (s *Store) ListReportImports(ctx context.Context, portfolioIDs []string) ([]ReportImport, error) {
 	stmt := `SELECT ` + reportImportColumns + `
-		FROM report_imports WHERE portfolio_id = $1
+		FROM report_imports WHERE portfolio_id = ANY($1::uuid[])
 		ORDER BY created_at DESC`
-	rows, err := s.db.QueryContext(ctx, stmt, portfolioID)
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(portfolioIDs))
 	if err != nil {
 		return nil, fmt.Errorf("select report imports: %w", err)
 	}

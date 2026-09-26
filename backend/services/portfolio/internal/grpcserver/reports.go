@@ -46,7 +46,7 @@ func (s *Server) CreateReportImport(ctx context.Context, req *portfoliopb.Create
 		return nil, status.Error(codes.InvalidArgument, "id must be a UUID")
 	}
 
-	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
+	p, err := s.loadWritablePortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (s *Server) ListReportImports(ctx context.Context, req *portfoliopb.ListRep
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.Store.ListReportImports(ctx, p.ID)
+	list, err := s.Store.ListReportImports(ctx, p.SourceIDs())
 	if err != nil {
 		s.Log.Error("list report imports", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")

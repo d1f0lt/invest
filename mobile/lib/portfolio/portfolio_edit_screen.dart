@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../api/portfolio_api.dart';
+import 'portfolio_picker.dart';
 import 'portfolio_store.dart';
 
-/// «Редактирование портфеля»: пока только название.
+/// «Редактирование портфеля»: пока только название. У составного ниже
+/// показан его состав (изменить его пока нельзя).
 class PortfolioEditScreen extends StatefulWidget {
   const PortfolioEditScreen({super.key, required this.portfolio});
 
@@ -75,6 +77,7 @@ class _PortfolioEditScreenState extends State<PortfolioEditScreen> {
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
+              if (widget.portfolio.isComposite) ..._members(context),
               const Spacer(),
               SizedBox(
                 height: 52,
@@ -96,5 +99,26 @@ class _PortfolioEditScreenState extends State<PortfolioEditScreen> {
         ),
       ),
     );
+  }
+
+  List<Widget> _members(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final members = PortfolioStore.instance.membersOf(widget.portfolio);
+    return [
+      const SizedBox(height: 8),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+        child: Text(
+          'Составной портфель из',
+          style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      for (final p in members)
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: const PortfolioAvatar(),
+          title: Text(p.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+    ];
   }
 }

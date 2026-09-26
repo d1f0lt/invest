@@ -86,14 +86,23 @@ class PortfolioStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Создаёт портфель и сразу делает его текущим. Ошибки пробрасывает вызывающему.
-  Future<Portfolio> create(String name) async {
-    final created = await _api.create(name);
+  /// Создаёт портфель (с [memberIds] — составной) и сразу делает его текущим.
+  /// Ошибки пробрасывает вызывающему.
+  Future<Portfolio> create(String name, {List<String> memberIds = const []}) async {
+    final created = await _api.create(name, memberIds: memberIds);
     portfolios = [...portfolios, created];
     current = created;
     notifyListeners();
+    // У составного сразу есть данные — его участников.
+    if (created.isComposite) loadStats();
     return created;
   }
+
+  /// Портфели, из которых собран [portfolio] (в порядке выбора при создании).
+  List<Portfolio> membersOf(Portfolio portfolio) => [
+        for (final id in portfolio.memberIds)
+          ...portfolios.where((p) => p.id == id),
+      ];
 
   /// Переименовывает портфель. Ошибки пробрасывает вызывающему.
   Future<void> rename(String id, String name) async {

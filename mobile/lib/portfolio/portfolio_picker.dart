@@ -4,10 +4,12 @@ import 'portfolio_store.dart';
 import 'portfolios_screen.dart';
 
 /// Иконка портфеля в цветной плашке — используется в шапке и в списке.
+/// [composite] — составной портфель (другая иконка и цвета).
 class PortfolioAvatar extends StatelessWidget {
-  const PortfolioAvatar({super.key, this.size = 36});
+  const PortfolioAvatar({super.key, this.size = 36, this.composite = false});
 
   final double size;
+  final bool composite;
 
   @override
   Widget build(BuildContext context) {
@@ -17,13 +19,19 @@ class PortfolioAvatar extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * 0.3),
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF5B2A86), Color(0xFF0E8C8C)],
+          colors: composite
+              ? const [Color(0xFF1F4E9E), Color(0xFF6A3FB5)]
+              : const [Color(0xFF5B2A86), Color(0xFF0E8C8C)],
         ),
       ),
-      child: Icon(Icons.business_center_rounded, size: size * 0.55, color: scheme.onPrimary),
+      child: Icon(
+        composite ? Icons.layers_rounded : Icons.business_center_rounded,
+        size: size * 0.55,
+        color: scheme.onPrimary,
+      ),
     );
   }
 }
@@ -48,7 +56,7 @@ class PortfolioSelector extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const PortfolioAvatar(),
+                PortfolioAvatar(composite: store.current?.isComposite ?? false),
                 const SizedBox(width: 10),
                 Flexible(
                   child: Text(

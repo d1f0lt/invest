@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../api/api_client.dart';
 import '../api/portfolio_api.dart';
+import 'portfolio_create_screen.dart';
 import 'portfolio_edit_screen.dart';
 import 'portfolio_picker.dart';
 import 'portfolio_store.dart';
@@ -26,20 +26,7 @@ class _PortfoliosScreenState extends State<PortfoliosScreen> {
     super.dispose();
   }
 
-  Future<void> _create() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _NewPortfolioDialog(),
-    );
-    if (name == null || !mounted) return;
-    try {
-      await _store.create(name);
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    }
-  }
+  Future<void> _create() => openPortfolioCreate(context);
 
   void _select(Portfolio p) {
     _store.select(p);
@@ -145,6 +132,7 @@ class _PortfoliosScreenState extends State<PortfoliosScreen> {
         final p = items[i];
         return PortfolioCard(
           portfolio: p,
+          members: _store.membersOf(p),
           stats: _store.statsFor(p.id),
           selected: p.id == _store.current?.id,
           onTap: () => _select(p),
@@ -162,6 +150,7 @@ class PortfolioCard extends StatelessWidget {
   const PortfolioCard({
     super.key,
     required this.portfolio,
+    this.members = const [],
     required this.stats,
     required this.selected,
     required this.onTap,
@@ -169,6 +158,9 @@ class PortfolioCard extends StatelessWidget {
   });
 
   final Portfolio portfolio;
+
+  /// Для составного портфеля — из чего он собран (подпись под названием).
+  final List<Portfolio> members;
   final PortfolioStats stats;
   final bool selected;
   final VoidCallback onTap;
@@ -198,17 +190,32 @@ class PortfolioCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const PortfolioAvatar(size: 40),
+                  PortfolioAvatar(size: 40, composite: portfolio.isComposite),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      portfolio.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          portfolio.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        if (portfolio.isComposite)
+                          Text(
+                            compositeSubtitle(portfolio, members),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          ),
+                      ],
                     ),
                   ),
                   if (selected) Icon(Icons.check_circle_rounded, color: scheme.primary),
@@ -255,42 +262,20 @@ class PortfolioCard extends StatelessWidget {
   }
 }
 
-class _NewPortfolioDialog extends StatefulWidget {
-  const _NewPortfolioDialog();
-
-  @override
-  State<_NewPortfolioDialog> createState() => _NewPortfolioDialogState();
-}
-
-class _NewPortfolioDialogState extends State<_NewPortfolioDialog> {
-  final _name = TextEditingController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
+/// «Составной · ИИС + Брокерский» (или «Составной · 2 портфеля», пока имена
+/// участников не загружены).
+String compositeSubtitle(Portfolio portfolio, List<Portfolio> members) {
+  if (members.length == portfolio.memberIds.length) {
+    return 'Составной · ${members.map((p) => p.displayName).join(' + ')}';
   }
-
-  void _submit() {
-    if (_name.text.trim().isEmpty) return;
-    Navigator.of(context).pop(_name.text.trim());
+  final n = portfolio.memberIds.length;
+  final String word;
+  if (n % 10 == 1 && n % 100 != 11) {
+    word = 'портфель';
+  } else if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) {
+    word = 'портфеля';
+  } else {
+    word = 'портфелей';
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Новый портфель'),
-      content: TextField(
-        controller: _name,
-        autofocus: true,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(hintText: 'Например, «ИИС»'),
-        onSubmitted: (_) => _submit(),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        FilledButton(onPressed: _submit, child: const Text('Создать')),
-      ],
-    );
-  }
+  return 'Составной · $n $word';
 }

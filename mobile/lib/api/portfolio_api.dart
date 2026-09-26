@@ -1,15 +1,24 @@
 import 'api_client.dart';
 
 class Portfolio {
-  const Portfolio({required this.id, required this.name});
+  const Portfolio({required this.id, required this.name, this.memberIds = const []});
 
   factory Portfolio.fromJson(Map<String, dynamic> json) => Portfolio(
         id: json['id'] as String,
         name: json['name'] as String? ?? '',
+        memberIds: (json['member_ids'] as List<dynamic>? ?? const [])
+            .map((e) => e as String)
+            .toList(),
       );
 
   final String id;
   final String name;
+
+  /// Составной портфель — id портфелей, из которых он собран. У обычного пусто.
+  final List<String> memberIds;
+
+  /// Собран из других портфелей: своих сделок нет, отчёты в него не загружаются.
+  bool get isComposite => memberIds.isNotEmpty;
 
   String get displayName => name.trim().isEmpty ? 'Без названия' : name;
 }
@@ -333,10 +342,14 @@ class PortfolioApi {
   }
 
   /// `POST /api/v1/portfolios` → 201 с созданным портфелем.
-  Future<Portfolio> create(String name) async {
+  /// [memberIds] (от 2 обычных портфелей) — создать составной портфель.
+  Future<Portfolio> create(String name, {List<String> memberIds = const []}) async {
     final json = await _client.post(
       '/api/v1/portfolios',
-      {'name': name.trim()},
+      {
+        'name': name.trim(),
+        if (memberIds.isNotEmpty) 'member_ids': memberIds,
+      },
       auth: true,
     );
     return Portfolio.fromJson(json! as Map<String, dynamic>);

@@ -3,20 +3,35 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../api/portfolio_api.dart';
 import '../api/reports_api.dart';
+import '../portfolio/portfolio_picker.dart';
 import '../portfolio/portfolio_store.dart';
 import 'broker_avatar.dart';
 import 'report_upload_screen.dart';
 
 /// Открывает загрузку отчёта в текущий портфель: сначала выбор брокера,
-/// затем выбор файла и ожидание разбора.
+/// затем выбор файла и ожидание разбора. Текущий портфель составной —
+/// сначала спрашиваем, в какой из его портфелей загрузить отчёт.
 Future<void> openReportUpload(BuildContext context) async {
-  final portfolio = PortfolioStore.instance.current;
-  if (portfolio == null) {
+  final store = PortfolioStore.instance;
+  final current = store.current;
+  if (current == null) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('Портфель ещё загружается')));
     return;
   }
+  var target = current;
+  if (current.isComposite) {
+    final picked = await showModalBottomSheet<Portfolio>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      builder: (_) => _MemberPickerSheet(members: store.membersOf(current)),
+    );
+    if (picked == null || !context.mounted) return;
+    target = picked;
+  }
+  final portfolio = target;
   await Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(builder: (_) => BrokerSelectScreen(portfolio: portfolio)),
   );
@@ -156,6 +171,50 @@ class _Message extends StatelessWidget {
           Center(child: action),
         ],
       ],
+    );
+  }
+}
+
+/// «Куда загрузить отчёт?» — выбор портфеля внутри составного.
+class _MemberPickerSheet extends StatelessWidget {
+  const _MemberPickerSheet({required this.members});
+
+  final List<Portfolio> members;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+            child: Text(
+              'В какой портфель загрузить отчёт?',
+              style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              'Составной портфель собирается из других — отчёт добавится в выбранный '
+              'и сразу появится здесь',
+              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ),
+          for (final p in members)
+            ListTile(
+              leading: const PortfolioAvatar(),
+              title: Text(p.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).pop(p),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }

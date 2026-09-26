@@ -49,6 +49,32 @@ type Portfolio struct {
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	MemberIDs []string
+}
+
+func (p Portfolio) Composite() bool { return len(p.MemberIDs) > 0 }
+
+func (p Portfolio) SourceIDs() []string {
+	if p.Composite() {
+		return p.MemberIDs
+	}
+	return []string{p.ID}
+}
+
+const portfolioColumns = `p.id, p.user_id, p.name, p.created_at, p.updated_at,
+	ARRAY(SELECT m.member_id::text FROM portfolio_members m WHERE m.portfolio_id = p.id ORDER BY m.position)`
+
+func scanPortfolio(row rowScanner) (Portfolio, error) {
+	var p Portfolio
+	var members pq.StringArray
+	if err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt, &members); err != nil {
+		return Portfolio{}, err
+	}
+	if len(members) > 0 {
+		p.MemberIDs = []string(members)
+	}
+	return p, nil
 }
 
 type Trade struct {
@@ -118,26 +144,40 @@ func (s *Store) Close() { s.db.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
-func (s *Store) CreatePortfolio(ctx context.Context, userID, name string) (Portfolio, error) {
-	const stmt = `
-		INSERT INTO portfolios (user_id, name)
-		VALUES ($1, $2)
-		RETURNING id, user_id, name, created_at, updated_at
-	`
-	var p Portfolio
-	err := s.db.QueryRowContext(ctx, stmt, userID, name).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+func (s *Store) CreatePortfolio(ctx context.Context, userID, name string, memberIDs []string) (Portfolio, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	var id string
+	err = tx.QueryRowContext(ctx, `INSERT INTO portfolios (user_id, name) VALUES ($1, $2) RETURNING id`, userID, name).Scan(&id)
 	if err != nil {
 		return Portfolio{}, fmt.Errorf("insert portfolio: %w", err)
+	}
+	for i, m := range memberIDs {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO portfolio_members (portfolio_id, member_id, position) VALUES ($1, $2, $3)`, id, m, i)
+		if err != nil {
+			return Portfolio{}, fmt.Errorf("insert portfolio member: %w", err)
+		}
+	}
+
+	p, err := scanPortfolio(tx.QueryRowContext(ctx, `SELECT `+portfolioColumns+` FROM portfolios p WHERE p.id = $1`, id))
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("select portfolio: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Portfolio{}, fmt.Errorf("commit: %w", err)
 	}
 	return p, nil
 }
 
 func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Portfolio, error) {
-	const stmt = `
-		SELECT id, user_id, name, created_at, updated_at
-		FROM portfolios WHERE user_id = $1
-		ORDER BY created_at DESC
-	`
+	stmt := `SELECT ` + portfolioColumns + `
+		FROM portfolios p WHERE p.user_id = $1
+		ORDER BY p.created_at DESC`
 	rows, err := s.db.QueryContext(ctx, stmt, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select portfolios: %w", err)
@@ -146,8 +186,8 @@ func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Port
 
 	var out []Portfolio
 	for rows.Next() {
-		var p Portfolio
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		p, err := scanPortfolio(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan portfolio: %w", err)
 		}
 		out = append(out, p)
@@ -156,12 +196,8 @@ func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Port
 }
 
 func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) {
-	const stmt = `
-		SELECT id, user_id, name, created_at, updated_at
-		FROM portfolios WHERE id = $1
-	`
-	var p Portfolio
-	err := s.db.QueryRowContext(ctx, stmt, id).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+	stmt := `SELECT ` + portfolioColumns + ` FROM portfolios p WHERE p.id = $1`
+	p, err := scanPortfolio(s.db.QueryRowContext(ctx, stmt, id))
 
 	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
 		return Portfolio{}, ErrNotFound
@@ -173,13 +209,10 @@ func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) 
 }
 
 func (s *Store) RenamePortfolio(ctx context.Context, id, name string) (Portfolio, error) {
-	const stmt = `
-		UPDATE portfolios SET name = $2, updated_at = now()
-		WHERE id = $1
-		RETURNING id, user_id, name, created_at, updated_at
-	`
-	var p Portfolio
-	err := s.db.QueryRowContext(ctx, stmt, id, name).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+	stmt := `UPDATE portfolios p SET name = $2, updated_at = now()
+		WHERE p.id = $1
+		RETURNING ` + portfolioColumns
+	p, err := scanPortfolio(s.db.QueryRowContext(ctx, stmt, id, name))
 	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
 		return Portfolio{}, ErrNotFound
 	}
@@ -255,13 +288,13 @@ func (s *Store) CreateTradesBatch(ctx context.Context, trades []Trade) ([]Trade,
 	return out, nil
 }
 
-func (s *Store) ListTrades(ctx context.Context, portfolioID string) ([]Trade, error) {
+func (s *Store) ListTrades(ctx context.Context, portfolioIDs []string) ([]Trade, error) {
 	const stmt = `
 		SELECT id, portfolio_id, secid, board, side, quantity, price, fee, currency, executed_at, created_at, accrued_interest, COALESCE(external_id, '')
-		FROM trades WHERE portfolio_id = $1
+		FROM trades WHERE portfolio_id = ANY($1::uuid[])
 		ORDER BY executed_at ASC, created_at ASC
 	`
-	rows, err := s.db.QueryContext(ctx, stmt, portfolioID)
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(portfolioIDs))
 	if err != nil {
 		return nil, fmt.Errorf("select trades: %w", err)
 	}
@@ -497,14 +530,14 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, 
 	return res, nil
 }
 
-func (s *Store) ListCashOperations(ctx context.Context, portfolioID string) ([]CashOperation, error) {
+func (s *Store) ListCashOperations(ctx context.Context, portfolioIDs []string) ([]CashOperation, error) {
 	const stmt = `
 		SELECT id, portfolio_id, type, amount, currency, occurred_at,
 		       COALESCE(secid, ''), COALESCE(board, ''), description, COALESCE(external_id, ''), created_at
-		FROM cash_operations WHERE portfolio_id = $1
+		FROM cash_operations WHERE portfolio_id = ANY($1::uuid[])
 		ORDER BY occurred_at ASC, created_at ASC
 	`
-	rows, err := s.db.QueryContext(ctx, stmt, portfolioID)
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(portfolioIDs))
 	if err != nil {
 		return nil, fmt.Errorf("select cash operations: %w", err)
 	}
