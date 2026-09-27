@@ -33,6 +33,7 @@ class PortfolioStats {
     this.yieldPercent = 0,
     this.hasData = false,
     this.positions = const [],
+    this.instruments = const [],
     this.cashBalance = 0,
     this.passiveIncome = 0,
     this.passivePercent = 0,
@@ -56,10 +57,10 @@ class PortfolioStats {
       'total_other', 'net_deposits', 'cash_balance',
     ];
     final hasData = instruments.isNotEmpty || totals.any((k) => value(k) != 0);
-    final positions = instruments
+    final all = instruments
         .map((e) => Position.fromJson(e as Map<String, dynamic>))
-        .where((p) => p.quantity > 0)
         .toList();
+    final positions = all.where((p) => p.quantity > 0).toList();
     final cash = value('cash_balance');
     // За день — изменение цены позиций к закрытию прошлого торгового дня
     // (`total_day_change`), в % — от стоимости портфеля на то закрытие.
@@ -72,6 +73,7 @@ class PortfolioStats {
     return PortfolioStats(
       hasData: hasData,
       positions: positions,
+      instruments: all,
       cashBalance: cash,
       profit: profit,
       profitPercent: percent,
@@ -98,6 +100,10 @@ class PortfolioStats {
   /// Открытые позиции (количество > 0) — для вкладки «Активы».
   final List<Position> positions;
 
+  /// Все бумаги, по которым были сделки или выплаты, включая закрытые
+  /// (количество 0) — для вкладки «В портфеле» карточки актива.
+  final List<Position> instruments;
+
   /// Свободные рубли на счёте (`cash_balance`).
   final double cashBalance;
 
@@ -122,6 +128,11 @@ class Position {
     this.marketValue,
     this.unrealizedPnl,
     this.dayChange,
+    this.realizedPnl = 0,
+    this.dividends = 0,
+    this.coupons = 0,
+    this.accruedInterest = 0,
+    this.totalPnl = 0,
   });
 
   factory Position.fromJson(Map<String, dynamic> json) {
@@ -135,6 +146,11 @@ class Position {
       marketValue: opt('market_value'),
       unrealizedPnl: opt('unrealized_pnl'),
       dayChange: opt('day_change'),
+      realizedPnl: opt('realized_pnl') ?? 0,
+      dividends: opt('dividends') ?? 0,
+      coupons: opt('coupons') ?? 0,
+      accruedInterest: opt('accrued_interest') ?? 0,
+      totalPnl: opt('total_pnl') ?? 0,
     );
   }
 
@@ -157,6 +173,22 @@ class Position {
   /// Изменение стоимости позиции с закрытия прошлого торгового дня.
   /// Нет текущей цены или цены закрытия — null.
   final double? dayChange;
+
+  /// Зафиксированная прибыль: продажи и погашения относительно средней
+  /// цены покупки, за вычетом комиссий.
+  final double realizedPnl;
+
+  /// Полученные дивиденды (после налога, удержанного брокером).
+  final double dividends;
+
+  /// Полученные купоны.
+  final double coupons;
+
+  /// НКД: получен при продажах минус уплачен при покупках (облигации).
+  final double accruedInterest;
+
+  /// Вся прибыль по бумаге: realized + unrealized + дивиденды + купоны + НКД.
+  final double totalPnl;
 
   String get key => '$secid@$board';
 

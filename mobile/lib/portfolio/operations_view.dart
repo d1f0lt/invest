@@ -10,9 +10,10 @@ import 'portfolio_app_bar.dart';
 import 'portfolio_store.dart';
 import 'stats_format.dart';
 
-/// Одна строка ленты: сделка или денежная операция.
-class _Operation {
-  _Operation.trade(Trade t)
+/// Одна строка ленты: сделка или денежная операция. Используется и во
+/// вкладке «В портфеле» карточки актива.
+class PortfolioOperation {
+  PortfolioOperation.trade(Trade t)
       : at = t.executedAt.toLocal(),
         type = t.isBuy ? 'buy' : 'sell',
         amount = t.cashFlow,
@@ -23,7 +24,7 @@ class _Operation {
         opening = t.isOpening,
         description = '';
 
-  _Operation.cash(CashOperation c)
+  PortfolioOperation.cash(CashOperation c)
       : at = c.occurredAt.toLocal(),
         type = c.type,
         amount = c.amount,
@@ -62,6 +63,8 @@ class _Operation {
       };
 
   IconData get icon => switch (type) {
+        'buy' => Icons.add_shopping_cart_rounded,
+        'sell' => Icons.sell_outlined,
         'deposit' => Icons.account_balance_wallet_rounded,
         'withdrawal' => Icons.north_east_rounded,
         'dividend' || 'coupon' => Icons.payments_rounded,
@@ -87,7 +90,7 @@ class _OperationsViewState extends State<OperationsView> with AutomaticKeepAlive
   final _store = PortfolioStore.instance;
   final _directory = SecurityDirectory.instance;
 
-  List<_Operation>? _items;
+  List<PortfolioOperation>? _items;
   String? _error;
   bool _loading = false;
   Future<void>? _pending;
@@ -136,8 +139,8 @@ class _OperationsViewState extends State<OperationsView> with AutomaticKeepAlive
         _api.cashOperations(portfolioId),
       ).wait;
       final items = [
-        ...trades.map(_Operation.trade),
-        ...cash.where((c) => !c.isOpeningSecurities).map(_Operation.cash),
+        ...trades.map(PortfolioOperation.trade),
+        ...cash.where((c) => !c.isOpeningSecurities).map(PortfolioOperation.cash),
       ]..sort((a, b) => b.at.compareTo(a.at));
       if (!mounted || seq != _seq) return;
       setState(() {
@@ -210,9 +213,9 @@ class _OperationsViewState extends State<OperationsView> with AutomaticKeepAlive
       final d = DateTime(op.at.year, op.at.month, op.at.day);
       if (d != day) {
         day = d;
-        children.add(_DayHeader(day: d));
+        children.add(OperationDayHeader(day: d));
       }
-      children.add(_OperationTile(op: op, directory: _directory));
+      children.add(OperationTile(op: op, directory: _directory));
     }
     return children;
   }
@@ -223,10 +226,15 @@ const _months = [
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ];
 
-class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.day});
+class OperationDayHeader extends StatelessWidget {
+  const OperationDayHeader({
+    super.key,
+    required this.day,
+    this.padding = const EdgeInsets.fromLTRB(16, 20, 16, 4),
+  });
 
   final DateTime day;
+  final EdgeInsets padding;
 
   String _label() {
     final now = DateTime.now();
@@ -241,7 +249,7 @@ class _DayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      padding: padding,
       child: Text(
         _label(),
         style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
@@ -250,21 +258,33 @@ class _DayHeader extends StatelessWidget {
   }
 }
 
-class _OperationTile extends StatelessWidget {
-  const _OperationTile({required this.op, required this.directory});
+class OperationTile extends StatelessWidget {
+  const OperationTile({
+    super.key,
+    required this.op,
+    required this.directory,
+    this.showSecurity = true,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+  });
 
-  final _Operation op;
+  final PortfolioOperation op;
   final SecurityDirectory directory;
+
+  /// false — лента одной бумаги (карточка актива): вместо значка тикера —
+  /// иконка операции, в подписи нет названия бумаги.
+  final bool showSecurity;
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final secid = op.secid;
+    final secid = showSecurity ? op.secid : null;
     final security = secid == null ? null : directory.lookup(secid, op.board ?? '');
 
     final subtitle = switch (op.trade) {
-      final t? => '${security?.title ?? t.secid} · ${_quantity(t.quantity)} шт. × '
+      final t? => '${showSecurity ? '${security?.title ?? t.secid} · ' : ''}'
+          '${_quantity(t.quantity)} шт. × '
           '${formatPrice(t.price, bond: false, currency: t.currency)}',
       null => security?.title ?? op.description,
     };
@@ -283,7 +303,7 @@ class _OperationTile extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: padding,
       child: Row(
         children: [
           if (secid != null)

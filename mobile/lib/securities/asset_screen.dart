@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../api/securities_api.dart';
 import '../favorites/favorites_store.dart';
+import '../portfolio/portfolio_store.dart';
+import '../portfolio/position_view.dart';
 import '../portfolio/stats_format.dart';
 import 'price_chart.dart';
 import 'security_widgets.dart';
 
 /// Карточка актива: значок и название, текущая цена с изменением за день,
 /// вкладки «Обзор / Дивиденды / В портфеле», на «Обзоре» — график цены
-/// с изменением за выбранный период. Звезда в шапке — избранное.
+/// с изменением за выбранный период, «В портфеле» — позиция, прибыль и
+/// операции по бумаге в текущем портфеле. Звезда в шапке — избранное.
 class AssetScreen extends StatefulWidget {
   const AssetScreen({super.key, required this.security});
 
@@ -81,7 +84,15 @@ class _AssetScreenState extends State<AssetScreen> {
       _loadChart(force: true),
       if (_info == null || _info!.isEmpty) _loadInfo(),
       if (_tab == _Tab.dividends) _loadDividends(),
+      if (_tab == _Tab.position) _refreshPosition(),
     ]);
+  }
+
+  /// Сводка портфеля перечитывается целиком; операции по бумаге вкладка
+  /// «В портфеле» подтянет сама по новой ревизии сводки.
+  Future<void> _refreshPosition() {
+    final store = PortfolioStore.instance;
+    return store.loaded ? store.loadStats() : store.load();
   }
 
   Future<void> _loadDividends() async {
@@ -280,10 +291,7 @@ class _AssetScreenState extends State<AssetScreen> {
                 security: _security,
               )
             else
-              const _Soon(
-                icon: Icons.business_center_outlined,
-                text: 'Позиция по бумаге в вашем портфеле появится позже',
-              ),
+              AssetPositionView(security: _security),
           ],
         ),
       ),
