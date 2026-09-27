@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	notifierpb "invest/backend/services/gateway/internal/notifierpb"
 	portfoliopb "invest/backend/services/gateway/internal/portfoliopb"
 	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 	userspb "invest/backend/services/gateway/internal/userspb"
@@ -17,20 +18,24 @@ type Clients struct {
 	Users            userspb.UsersServiceClient
 	Portfolio        portfoliopb.PortfolioServiceClient
 	SecuritiesReader securitiesreaderpb.SecuritiesReaderServiceClient
+	Notifier         notifierpb.NotifierServiceClient
 
 	usersConn            *grpc.ClientConn
 	portfolioConn        *grpc.ClientConn
 	securitiesReaderConn *grpc.ClientConn
+	notifierConn         *grpc.ClientConn
 
 	usersHealth            grpc_health_v1.HealthClient
 	portfolioHealth        grpc_health_v1.HealthClient
 	securitiesReaderHealth grpc_health_v1.HealthClient
+	notifierHealth         grpc_health_v1.HealthClient
 }
 
 type Addrs struct {
 	Users            string
 	Portfolio        string
 	SecuritiesReader string
+	Notifier         string
 }
 
 func Dial(addrs Addrs) (*Clients, error) {
@@ -49,19 +54,29 @@ func Dial(addrs Addrs) (*Clients, error) {
 		portfolioConn.Close()
 		return nil, fmt.Errorf("dial securities_reader service: %w", err)
 	}
+	notifierConn, err := grpc.NewClient(addrs.Notifier, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		usersConn.Close()
+		portfolioConn.Close()
+		securitiesReaderConn.Close()
+		return nil, fmt.Errorf("dial notifier service: %w", err)
+	}
 
 	return &Clients{
 		Users:            userspb.NewUsersServiceClient(usersConn),
 		Portfolio:        portfoliopb.NewPortfolioServiceClient(portfolioConn),
 		SecuritiesReader: securitiesreaderpb.NewSecuritiesReaderServiceClient(securitiesReaderConn),
+		Notifier:         notifierpb.NewNotifierServiceClient(notifierConn),
 
 		usersConn:            usersConn,
 		portfolioConn:        portfolioConn,
 		securitiesReaderConn: securitiesReaderConn,
+		notifierConn:         notifierConn,
 
 		usersHealth:            grpc_health_v1.NewHealthClient(usersConn),
 		portfolioHealth:        grpc_health_v1.NewHealthClient(portfolioConn),
 		securitiesReaderHealth: grpc_health_v1.NewHealthClient(securitiesReaderConn),
+		notifierHealth:         grpc_health_v1.NewHealthClient(notifierConn),
 	}, nil
 }
 
@@ -69,6 +84,7 @@ func (c *Clients) Close() {
 	c.usersConn.Close()
 	c.portfolioConn.Close()
 	c.securitiesReaderConn.Close()
+	c.notifierConn.Close()
 }
 
 type HealthReport map[string]string
@@ -79,6 +95,7 @@ func (c *Clients) CheckAll(ctx context.Context) HealthReport {
 		"users":             c.usersHealth,
 		"portfolio":         c.portfolioHealth,
 		"securities_reader": c.securitiesReaderHealth,
+		"notifier":          c.notifierHealth,
 	} {
 		if err := checkOne(ctx, client); err != nil {
 			problems[name] = err.Error()

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../alerts/alerts_store.dart';
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
 import '../api/session.dart';
@@ -74,6 +75,7 @@ class _ProfileTabState extends State<ProfileTab> {
     setState(() => _loggingOut = true);
     final refreshToken = await Session.instance.clear();
     PortfolioStore.instance.reset();
+    AlertsStore.instance.reset();
     if (refreshToken != null) {
       try {
         await _api.logout(refreshToken);
@@ -89,6 +91,7 @@ class _ProfileTabState extends State<ProfileTab> {
     if (!deleted) return;
     await Session.instance.clear();
     PortfolioStore.instance.reset();
+    AlertsStore.instance.reset();
     if (mounted) _toLogin();
   }
 

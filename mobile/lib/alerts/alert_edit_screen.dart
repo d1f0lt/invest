@@ -161,15 +161,34 @@ class _AlertEditScreenState extends State<AlertEditScreen> {
         );
       }
       if (mounted) Navigator.of(context).pop(true);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError('Не удалось сохранить уведомление');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
+  void _showError(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
   Future<void> _delete() async {
     final ok = await confirmAlertDelete(context);
     if (ok != true || !mounted) return;
-    await AlertsStore.instance.remove(widget.alert!.id);
+    try {
+      await AlertsStore.instance.remove(widget.alert!.id);
+    } on ApiException catch (e) {
+      _showError('Не удалось удалить: ${e.message}');
+      return;
+    } catch (_) {
+      _showError('Не удалось удалить уведомление');
+      return;
+    }
     if (mounted) Navigator.of(context).pop(false);
   }
 

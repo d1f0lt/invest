@@ -75,6 +75,15 @@ func NewMux(h *Handlers) http.Handler {
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports", h.requireAuth(h.Reports.List))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports/{report_id}", h.requireAuth(h.Reports.Get))
 
+	mux.HandleFunc("POST /api/v1/alerts", h.requireAuth(h.handleCreateAlert))
+	mux.HandleFunc("GET /api/v1/alerts", h.requireAuth(h.handleListAlerts))
+	mux.HandleFunc("PUT /api/v1/alerts/{id}", h.requireAuth(h.handleUpdateAlert))
+	mux.HandleFunc("DELETE /api/v1/alerts/{id}", h.requireAuth(h.handleDeleteAlert))
+
+	mux.HandleFunc("POST /api/v1/telegram/link", h.requireAuth(h.handleCreateTelegramLink))
+	mux.HandleFunc("GET /api/v1/telegram", h.requireAuth(h.handleGetTelegramLink))
+	mux.HandleFunc("DELETE /api/v1/telegram", h.requireAuth(h.handleDeleteTelegramLink))
+
 	return mux
 }
 

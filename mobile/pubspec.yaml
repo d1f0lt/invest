@@ -15,6 +15,8 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   # Избранные бумаги — хранятся локально на устройстве.
   shared_preferences: ^2.5.3
+  # Открыть чат бота в Telegram (кнопка «Подключить Telegram»).
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

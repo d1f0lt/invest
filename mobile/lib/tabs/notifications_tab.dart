@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../alerts/alert_edit_screen.dart';
@@ -5,12 +7,15 @@ import '../alerts/alert_format.dart';
 import '../alerts/alerts_store.dart';
 import '../alerts/price_alert.dart';
 import '../alerts/telegram_connect_view.dart';
+import '../alerts/telegram_launcher.dart';
+import '../api/alerts_api.dart';
+import '../api/api_client.dart';
 import '../api/securities_api.dart';
 import '../portfolio/stats_format.dart';
 import '../securities/security_widgets.dart';
 
-/// Вкладка «Уведомления»: при первом заходе — предложение подключить
-/// Telegram, дальше — список уведомлений о ценах и «+» для нового.
+/// Вкладка «Уведомления»: пока Telegram не подключён — предложение
+/// подключить бота, дальше — список уведомлений о ценах и «+» для нового.
 class NotificationsTab extends StatefulWidget {
   const NotificationsTab({super.key});
 
@@ -18,45 +23,116 @@ class NotificationsTab extends StatefulWidget {
   State<NotificationsTab> createState() => _NotificationsTabState();
 }
 
-class _NotificationsTabState extends State<NotificationsTab> {
+class _NotificationsTabState extends State<NotificationsTab> with WidgetsBindingObserver {
   final _store = AlertsStore.instance;
+  bool? _wasLinked;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _store.addListener(_onStoreChanged);
     _refresh(silent: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _store.removeListener(_onStoreChanged);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Вернулись из Telegram (или просто в приложение): проверяем привязку
+    // и статусы — уведомления могли сработать, пока приложение было свёрнуто.
+    if (state == AppLifecycleState.resumed) _refresh(silent: true);
+  }
+
+  void _onStoreChanged() {
+    final linked = _store.telegram?.linked;
+    if (linked == null) return;
+    if (_wasLinked == false && linked && mounted) {
+      final name = _store.telegram?.username;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(name == null ? 'Telegram подключён' : 'Telegram подключён: @$name'),
+        ),
+      );
+    }
+    _wasLinked = linked;
   }
 
   Future<void> _refresh({bool silent = false}) async {
     try {
       await _store.refresh();
+    } on ApiException catch (e) {
+      if (!silent && mounted) _snack(e.message);
     } catch (_) {
-      if (!silent && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось обновить цены')),
-        );
-      }
+      if (!silent && mounted) _snack('Не удалось обновить уведомления');
     }
   }
 
+  void _snack(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
   Future<void> _open([PriceAlert? alert]) async {
-    final saved = await Navigator.of(context).push<bool>(
+    await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => AlertEditScreen(alert: alert)),
     );
-    if (saved == true) _refresh(silent: true);
   }
 
   Future<void> _delete(PriceAlert alert) async {
     final messenger = ScaffoldMessenger.of(context);
-    await _store.remove(alert.id);
+    try {
+      await _store.remove(alert.id);
+    } on ApiException catch (e) {
+      _snack('Не удалось удалить: ${e.message}');
+      return;
+    } catch (_) {
+      _snack('Не удалось удалить уведомление');
+      return;
+    }
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text('Уведомление по ${alert.security.title} удалено'),
-          action: SnackBarAction(label: 'Отменить', onPressed: () => _store.restore(alert)),
+          action: SnackBarAction(label: 'Отменить', onPressed: () => _restore(alert)),
         ),
       );
+  }
+
+  Future<void> _restore(PriceAlert alert) async {
+    try {
+      await _store.restore(alert);
+    } on ApiException catch (e) {
+      if (mounted) _snack('Не удалось вернуть: ${e.message}');
+    } catch (_) {
+      if (mounted) _snack('Не удалось вернуть уведомление');
+    }
+  }
+
+  Future<void> _showTelegramSheet() async {
+    final status = _store.telegram;
+    if (status == null) return;
+    final disconnect = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _TelegramSheet(status: status),
+    );
+    if (disconnect != true || !mounted) return;
+    try {
+      await _store.disconnectTelegram();
+      if (mounted) _snack('Telegram отключён — уведомления не будут приходить');
+    } on ApiException catch (e) {
+      if (mounted) _snack(e.message);
+    } catch (_) {
+      if (mounted) _snack('Не удалось отключить Telegram');
+    }
   }
 
   @override
@@ -64,11 +140,21 @@ class _NotificationsTabState extends State<NotificationsTab> {
     return ListenableBuilder(
       listenable: _store,
       builder: (context, _) {
-        final showList = _store.loaded && _store.telegramPromptDone;
+        final prompt = _store.showTelegramPrompt;
+        final showList = _store.loaded && !prompt;
+        final telegram = _store.telegram;
         return Scaffold(
           appBar: AppBar(
             centerTitle: false,
             title: const Text('Уведомления'),
+            actions: [
+              if (showList && telegram != null && telegram.linked)
+                IconButton(
+                  tooltip: 'Telegram',
+                  onPressed: _showTelegramSheet,
+                  icon: const _TelegramIcon(),
+                ),
+            ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(2),
               child: SizedBox(
@@ -82,12 +168,20 @@ class _NotificationsTabState extends State<NotificationsTab> {
           floatingActionButton:
               showList && _store.items.isNotEmpty ? GradientAddButton(onPressed: _open) : null,
           body: !_store.loaded
-              ? const Center(child: CircularProgressIndicator())
-              : !_store.telegramPromptDone
+              ? _store.error != null && !_store.refreshing
+                  ? _LoadError(message: _store.error!, onRetry: () => _refresh())
+                  : const Center(child: CircularProgressIndicator())
+              : prompt
                   ? const TelegramConnectView()
-                  : _store.items.isEmpty
-                      ? _Empty(onCreate: _open)
-                      : _list(),
+                  : Column(
+                      children: [
+                        if (telegram != null && !telegram.linked)
+                          _TelegramBanner(botEnabled: telegram.botEnabled),
+                        Expanded(
+                          child: _store.items.isEmpty ? _Empty(onCreate: _open) : _list(),
+                        ),
+                      ],
+                    ),
         );
       },
     );
@@ -137,6 +231,183 @@ class _NotificationsTabState extends State<NotificationsTab> {
           onDelete: () async {
             if (await confirmAlertDelete(context) == true && mounted) _delete(a);
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _TelegramIcon extends StatelessWidget {
+  const _TelegramIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: const BoxDecoration(shape: BoxShape.circle, color: telegramBlue),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 2),
+        child: Transform.rotate(
+          angle: -math.pi / 7,
+          child: const Icon(Icons.send_rounded, color: Colors.white, size: 16),
+        ),
+      ),
+    );
+  }
+}
+
+/// Над списком, когда Telegram не подключён: уведомления не придут.
+class _TelegramBanner extends StatefulWidget {
+  const _TelegramBanner({required this.botEnabled});
+
+  final bool botEnabled;
+
+  @override
+  State<_TelegramBanner> createState() => _TelegramBannerState();
+}
+
+class _TelegramBannerState extends State<_TelegramBanner> {
+  bool _busy = false;
+
+  Future<void> _connect() async {
+    setState(() => _busy = true);
+    try {
+      await connectTelegram(context);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final waiting = AlertsStore.instance.waitingForTelegram;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: telegramBlue.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          const _TelegramIcon(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              !widget.botEnabled
+                  ? 'Telegram-бот пока не настроен на сервере — уведомления не будут приходить'
+                  : waiting
+                      ? 'Нажмите «Start» в чате с ботом — подключение подхватится само'
+                      : 'Telegram не подключён — уведомления не будут приходить',
+              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+            ),
+          ),
+          if (widget.botEnabled)
+            TextButton(
+              onPressed: _busy ? null : _connect,
+              child: _busy
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(waiting ? 'Открыть' : 'Подключить'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TelegramSheet extends StatelessWidget {
+  const _TelegramSheet({required this.status});
+
+  final TelegramStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final name = status.username;
+    final since = status.linkedAt;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const _TelegramIcon(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Telegram подключён',
+                        style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      if (name != null || since != null)
+                        Text(
+                          [
+                            if (name != null) '@$name',
+                            if (since != null) 'с ${alertDateTime(since)}',
+                          ].join(' · '),
+                          style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Уведомления о ценах приходят в чат с ботом. Если отключить Telegram, '
+              'уведомления останутся в приложении, но сообщения приходить перестанут.',
+              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
+                icon: const Icon(Icons.link_off_rounded),
+                label: const Text('Отключить Telegram'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadError extends StatelessWidget {
+  const _LoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 48, color: Theme.of(context).colorScheme.outline),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Повторить')),
+          ],
         ),
       ),
     );

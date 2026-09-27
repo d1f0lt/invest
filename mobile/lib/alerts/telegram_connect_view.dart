@@ -3,78 +3,153 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'alerts_store.dart';
+import 'telegram_launcher.dart';
 
-const _telegramBlue = Color(0xFF229ED9);
+const telegramBlue = Color(0xFF229ED9);
+const _telegramBlue = telegramBlue;
 const _telegramLight = Color(0xFF2AABEE);
 
-/// Первый заход на вкладку: предложение подключить Telegram-бота,
-/// через которого будут приходить уведомления.
-class TelegramConnectView extends StatelessWidget {
+/// Предложение подключить Telegram-бота, через которого приходят
+/// уведомления. Кнопка открывает чат с ботом; пока пользователь не нажал
+/// там «Start», приложение ждёт и само переключится на список.
+class TelegramConnectView extends StatefulWidget {
   const TelegramConnectView({super.key});
+
+  @override
+  State<TelegramConnectView> createState() => _TelegramConnectViewState();
+}
+
+class _TelegramConnectViewState extends State<TelegramConnectView> {
+  bool _busy = false;
+
+  Future<void> _connect() async {
+    setState(() => _busy = true);
+    try {
+      await connectTelegram(context);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    return SafeArea(
-      child: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const _TelegramLogo(),
-                const SizedBox(height: 28),
-                Text(
-                  'Подключите Telegram',
-                  textAlign: TextAlign.center,
-                  style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Уведомления о ценах будут приходить от нашего бота — '
-                  'даже когда приложение закрыто',
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 28),
-                const _Benefit(
-                  icon: Icons.bolt_rounded,
-                  text: 'Сообщение придёт, как только цена достигнет цели',
-                ),
-                const _Benefit(
-                  icon: Icons.tune_rounded,
-                  text: 'Бот только присылает сообщения — всё настраивается в приложении',
-                ),
-                const _Benefit(
-                  icon: Icons.notifications_off_outlined,
-                  text: 'Отключить можно в любой момент',
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: FilledButton.icon(
-                    onPressed: AlertsStore.instance.completeTelegramPrompt,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _telegramBlue,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      textStyle: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+    final store = AlertsStore.instance;
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final waiting = store.waitingForTelegram;
+        return SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const _TelegramLogo(),
+                    const SizedBox(height: 28),
+                    Text(
+                      'Подключите Telegram',
+                      textAlign: TextAlign.center,
+                      style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
                     ),
-                    icon: Transform.rotate(
-                      angle: -math.pi / 7,
-                      child: const Icon(Icons.send_rounded, size: 20),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Уведомления о ценах будут приходить от нашего бота — '
+                      'даже когда приложение закрыто',
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
                     ),
-                    label: const Text('Подключить Telegram'),
-                  ),
+                    const SizedBox(height: 28),
+                    const _Benefit(
+                      icon: Icons.bolt_rounded,
+                      text: 'Сообщение придёт, как только цена достигнет цели',
+                    ),
+                    const _Benefit(
+                      icon: Icons.tune_rounded,
+                      text: 'Бот только присылает сообщения — всё настраивается в приложении',
+                    ),
+                    const _Benefit(
+                      icon: Icons.notifications_off_outlined,
+                      text: 'Отключить можно в любой момент',
+                    ),
+                    const SizedBox(height: 32),
+                    if (waiting) ...[
+                      const _WaitingHint(),
+                      const SizedBox(height: 16),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: FilledButton.icon(
+                        onPressed: _busy ? null : _connect,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _telegramBlue,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: _telegramBlue.withValues(alpha: 0.6),
+                          disabledForegroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          textStyle: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        icon: _busy
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Transform.rotate(
+                                angle: -math.pi / 7,
+                                child: const Icon(Icons.send_rounded, size: 20),
+                              ),
+                        label: Text(waiting ? 'Открыть Telegram ещё раз' : 'Подключить Telegram'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: store.skipTelegramPrompt,
+                      child: const Text('Позже'),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+        );
+      },
+    );
+  }
+}
+
+class _WaitingHint extends StatelessWidget {
+  const _WaitingHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _telegramLight.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: _telegramBlue),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Нажмите «Start» в чате с ботом — мы подхватим подключение автоматически',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
       ),
     );
   }

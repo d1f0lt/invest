@@ -1,9 +1,10 @@
 USERS_SRC := ../users/proto/users.proto
 PORTFOLIO_SRC := ../portfolio/proto/portfolio.proto
 SECURITIESREADER_SRC := ../securities_reader/proto/securitiesreader.proto
+NOTIFIER_SRC := ../notifier/proto/notifier.proto
 
 .PHONY: proto
-proto: proto-users proto-portfolio proto-securitiesreader
+proto: proto-users proto-portfolio proto-securitiesreader proto-notifier
 
 .PHONY: proto-users
 proto-users:
@@ -35,8 +36,18 @@ proto-securitiesreader:
 		internal/securitiesreaderpb/securitiesreader.proto
 	rm internal/securitiesreaderpb/securitiesreader.proto
 
+.PHONY: proto-notifier
+proto-notifier:
+	mkdir -p internal/notifierpb
+	cp $(NOTIFIER_SRC) internal/notifierpb/notifier.proto
+	protoc -I internal/notifierpb \
+		--go_out=internal/notifierpb --go_opt=paths=source_relative \
+		--go-grpc_out=internal/notifierpb --go-grpc_opt=paths=source_relative \
+		internal/notifierpb/notifier.proto
+	rm internal/notifierpb/notifier.proto
+
 .PHONY: clean
-clean: clean-users clean-portfolio clean-securitiesreader
+clean: clean-users clean-portfolio clean-securitiesreader clean-notifier
 
 .PHONY: clean-users
 clean-users:
@@ -49,3 +60,7 @@ clean-portfolio:
 .PHONY: clean-securitiesreader
 clean-securitiesreader:
 	rm -rf internal/securitiesreaderpb
+
+.PHONY: clean-notifier
+clean-notifier:
+	rm -rf internal/notifierpb

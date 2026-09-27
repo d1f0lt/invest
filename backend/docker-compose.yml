@@ -41,6 +41,7 @@ services:
       - ./services/price_updater/migrations:/docker-entrypoint-initdb.d/migrations/10_price_updater:ro
       - ./services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
       - ./services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
+      - ./services/notifier/migrations:/docker-entrypoint-initdb.d/migrations/40_notifier:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -158,6 +159,32 @@ services:
       LOG_LEVEL: info
     healthcheck:
       test: ["CMD", "/app/portfolio", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Price alerts in Telegram: alert API for gateway (gRPC), the bot
+  # (/start <token> links a chat, /stop unlinks) and a once-a-minute check
+  # of latest_prices. Without TELEGRAM_BOT_TOKEN it runs but sends nothing.
+  # See services/notifier/README.md.
+  notifier:
+    build:
+      context: ./services/notifier
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      GRPC_ADDR: ":8085"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      CHECK_INTERVAL: 1m
+      PRICE_STALE_AFTER: 5m
+      LINK_TOKEN_TTL: 15m
+      MAX_ALERTS_PER_USER: 100
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "/app/notifier", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -313,6 +340,7 @@ services:
         users_proto: ./services/users/proto
         portfolio_proto: ./services/portfolio/proto
         securitiesreader_proto: ./services/securities_reader/proto
+        notifier_proto: ./services/notifier/proto
     restart: unless-stopped
     depends_on:
       users:
@@ -320,6 +348,8 @@ services:
       portfolio:
         condition: service_healthy
       securities_reader:
+        condition: service_healthy
+      notifier:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -333,6 +363,7 @@ services:
       USERS_GRPC_ADDR: users:8082
       PORTFOLIO_GRPC_ADDR: portfolio:8083
       SECURITIES_READER_GRPC_ADDR: securities_reader:8081
+      NOTIFIER_GRPC_ADDR: notifier:8085
       UPSTREAM_TIMEOUT: 15s
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded

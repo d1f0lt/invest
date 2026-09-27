@@ -1,3 +1,4 @@
+import '../api/alerts_api.dart';
 import '../api/securities_api.dart';
 
 /// Чего ждём от цены.
@@ -6,9 +7,7 @@ enum AlertDirection { up, down }
 /// Как пользователь задал изменение: в деньгах (пунктах) или в процентах.
 enum AlertMode { amount, percent }
 
-/// Уведомление о цене бумаги. Пока хранится только на устройстве
-/// (заготовка под `notifier`): поля совпадают с будущим API —
-/// базовая цена, цель, статус «сработало».
+/// Уведомление о цене бумаги (хранится в `notifier`, приходит в Telegram).
 class PriceAlert {
   const PriceAlert({
     required this.id,
@@ -24,25 +23,34 @@ class PriceAlert {
     this.triggeredPrice,
   });
 
-  factory PriceAlert.fromJson(Map<String, dynamic> json) => PriceAlert(
-        id: json['id'] as String,
-        security: Security.fromJson(json['security'] as Map<String, dynamic>),
-        direction: AlertDirection.values.byName(json['direction'] as String),
-        mode: AlertMode.values.byName(json['mode'] as String),
-        value: (json['value'] as num).toDouble(),
-        basePrice: (json['base_price'] as num).toDouble(),
-        targetPrice: (json['target_price'] as num).toDouble(),
-        createdAt: DateTime.parse(json['created_at'] as String),
-        updatedAt: DateTime.parse(json['updated_at'] as String),
-        triggeredAt: json['triggered_at'] == null
-            ? null
-            : DateTime.parse(json['triggered_at'] as String),
-        triggeredPrice: (json['triggered_price'] as num?)?.toDouble(),
-      );
+  /// Из ответа сервера. Режим ввода восстанавливается по `input_percent`:
+  /// есть — пользователь вводил проценты, нет — сумму.
+  factory PriceAlert.fromDto(AlertDto d) {
+    final percent = d.inputPercent;
+    return PriceAlert(
+      id: d.id,
+      security: Security(
+        secid: d.secid,
+        board: d.board,
+        shortName: d.shortName.isEmpty ? null : d.shortName,
+        currency: d.currency.isEmpty ? null : d.currency,
+        lastPrice: d.currentPrice,
+      ),
+      direction: d.above ? AlertDirection.up : AlertDirection.down,
+      mode: percent != null ? AlertMode.percent : AlertMode.amount,
+      value: percent != null ? percent.abs() : _round((d.targetPrice - d.basePrice).abs()),
+      basePrice: d.basePrice,
+      targetPrice: d.targetPrice,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+      triggeredAt: d.triggeredAt,
+      triggeredPrice: d.triggeredPrice,
+    );
+  }
 
   final String id;
 
-  /// Только справочные поля бумаги (без цен).
+  /// Бумага; `lastPrice` — текущая цена на момент последней загрузки списка.
   final Security security;
   final AlertDirection direction;
   final AlertMode mode;
@@ -60,16 +68,17 @@ class PriceAlert {
 
   bool get triggered => triggeredAt != null;
 
+  /// Текущая цена бумаги (с последней загрузки списка).
+  double? get currentPrice => security.lastPrice;
+
   /// Изменение цели относительно базовой цены, со знаком.
   double get delta => targetPrice - basePrice;
 
   /// То же в процентах, со знаком.
   double get deltaPercent => basePrice == 0 ? 0 : delta / basePrice * 100;
 
-  /// Достигла ли цена цели.
-  bool reachedBy(double price) =>
-      direction == AlertDirection.up ? price >= targetPrice : price <= targetPrice;
-
+  /// Цель, которую покажет приложение до сохранения. Сервер считает её сам
+  /// от своей текущей цены (и округляет до шага цены бумаги).
   static double targetFor({
     required double basePrice,
     required AlertDirection direction,
@@ -81,31 +90,26 @@ class PriceAlert {
     return double.parse(target.toStringAsFixed(basePrice.abs() >= 1 ? 4 : 8));
   }
 
-  PriceAlert markTriggered(double price, DateTime at) => PriceAlert(
-        id: id,
-        security: security,
-        direction: direction,
-        mode: mode,
-        value: value,
-        basePrice: basePrice,
-        targetPrice: targetPrice,
-        createdAt: createdAt,
-        updatedAt: updatedAt,
-        triggeredAt: at,
-        triggeredPrice: price,
-      );
+  /// Что отправить на сервер: проценты уходят процентами (со знаком),
+  /// сумма — готовой целевой ценой.
+  static AlertTarget apiTarget({
+    required double basePrice,
+    required AlertDirection direction,
+    required AlertMode mode,
+    required double value,
+  }) {
+    if (mode == AlertMode.percent) {
+      return AlertTarget.percent(direction == AlertDirection.up ? value : -value);
+    }
+    return AlertTarget.price(
+      targetFor(basePrice: basePrice, direction: direction, mode: mode, value: value),
+    );
+  }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'security': security.toJson(),
-        'direction': direction.name,
-        'mode': mode.name,
-        'value': value,
-        'base_price': basePrice,
-        'target_price': targetPrice,
-        'created_at': createdAt.toIso8601String(),
-        'updated_at': updatedAt.toIso8601String(),
-        if (triggeredAt != null) 'triggered_at': triggeredAt!.toIso8601String(),
-        if (triggeredPrice != null) 'triggered_price': triggeredPrice,
-      };
+  /// Условие этого уведомления для повторного создания (кнопка «Отменить»).
+  AlertTarget get restoreTarget => mode == AlertMode.percent
+      ? AlertTarget.percent(direction == AlertDirection.up ? value : -value)
+      : AlertTarget.price(targetPrice);
+
+  static double _round(double v) => double.parse(v.toStringAsFixed(6));
 }

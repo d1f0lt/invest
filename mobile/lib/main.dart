@@ -16,10 +16,9 @@ Future<void> main() async {
   await Session.instance.restore();
   // Избранное хранится на устройстве — подтягиваем его сразу при запуске.
   await FavoritesStore.instance.load();
-  // Уведомления о ценах пока тоже живут на устройстве (заготовка).
-  await AlertsStore.instance.load();
   Session.instance.onExpired = () {
     PortfolioStore.instance.reset();
+    AlertsStore.instance.reset();
     _navigatorKey.currentState
         ?.pushAndRemoveUntil(fadeRoute(const LoginScreen()), (_) => false);
   };

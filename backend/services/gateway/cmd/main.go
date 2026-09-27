@@ -52,6 +52,7 @@ func main() {
 		Users:            cfg.UsersGRPCAddr,
 		Portfolio:        cfg.PortfolioGRPCAddr,
 		SecuritiesReader: cfg.SecuritiesReaderGRPCAddr,
+		Notifier:         cfg.NotifierGRPCAddr,
 	})
 	if err != nil {
 		log.Error("failed to dial backend services", "error", err)
@@ -98,7 +99,7 @@ func main() {
 	}()
 
 	log.Info("gateway service starting", "addr", cfg.HTTPAddr,
-		"users", cfg.UsersGRPCAddr, "portfolio", cfg.PortfolioGRPCAddr, "securities_reader", cfg.SecuritiesReaderGRPCAddr)
+		"users", cfg.UsersGRPCAddr, "portfolio", cfg.PortfolioGRPCAddr, "securities_reader", cfg.SecuritiesReaderGRPCAddr, "notifier", cfg.NotifierGRPCAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server error", "error", err)
 		os.Exit(1)

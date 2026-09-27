@@ -35,6 +35,9 @@ class ApiClient {
   Future<Object?> post(String path, Map<String, dynamic> body, {bool auth = false}) =>
       _send('POST', path, body: body, auth: auth);
 
+  Future<Object?> put(String path, Map<String, dynamic> body, {bool auth = false}) =>
+      _send('PUT', path, body: body, auth: auth);
+
   Future<Object?> patch(String path, Map<String, dynamic> body, {bool auth = false}) =>
       _send('PATCH', path, body: body, auth: auth);
 
@@ -184,6 +187,7 @@ class ApiClient {
         404 => 'Не найдено',
         409 => 'Уже существует',
         413 => 'Файл слишком большой',
+        422 => 'Действие сейчас недоступно',
         >= 500 => 'Сервер временно недоступен',
         _ => 'Ошибка сервера ($code)',
       };
