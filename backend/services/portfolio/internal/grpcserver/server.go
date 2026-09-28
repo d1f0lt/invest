@@ -1,11 +1,3 @@
-// Package grpcserver implements the portfolio service's gRPC API
-// (invest.portfolio.v1.PortfolioService, see
-// proto/portfolio.proto). This is the direct
-// replacement for the old internal/httpapi package - same business
-// rules, same error semantics (including the "not found" response for a
-// portfolio that exists but belongs to someone else - see
-// loadOwnedPortfolio), different transport. See architecture-decisions.md,
-// "перевод внутреннего взаимодействия сервисов на gRPC".
 package grpcserver
 
 import (
@@ -14,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,27 +19,36 @@ import (
 	portfoliopb "invest/backend/services/portfolio/proto"
 )
 
-// Store is the subset of storage.Store the gRPC layer needs. Declared as
-// an interface here (rather than depending on *storage.Store directly) so
-// the server can be tested with a fake.
 type Store interface {
-	CreatePortfolio(ctx context.Context, userID, name string) (storage.Portfolio, error)
+	CreatePortfolio(ctx context.Context, userID, name string, memberIDs []string) (storage.Portfolio, error)
 	ListPortfoliosByUser(ctx context.Context, userID string) ([]storage.Portfolio, error)
 	GetPortfolio(ctx context.Context, id string) (storage.Portfolio, error)
+	RenamePortfolio(ctx context.Context, id, name string) (storage.Portfolio, error)
 	CreateTrade(ctx context.Context, t storage.Trade) (storage.Trade, error)
 	CreateTradesBatch(ctx context.Context, trades []storage.Trade) ([]storage.Trade, error)
-	ListTrades(ctx context.Context, portfolioID string) ([]storage.Trade, error)
-	ImportReport(ctx context.Context, portfolioID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error)
-	ListCashOperations(ctx context.Context, portfolioID string) ([]storage.CashOperation, error)
+	ListTrades(ctx context.Context, portfolioIDs []string) ([]storage.Trade, error)
+	ImportReport(ctx context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, opening *storage.OpeningScope) (storage.ImportResult, error)
+	ListCashOperations(ctx context.Context, portfolioIDs []string) ([]storage.CashOperation, error)
 	LatestPrices(ctx context.Context, instruments [][2]string) (map[string]float64, error)
+	PrevCloses(ctx context.Context, instruments [][2]string) (map[string]float64, error)
+	DailyCloses(ctx context.Context, instruments [][2]string, from time.Time) (map[string][]storage.DailyClose, error)
+
+	ListBrokers(ctx context.Context) ([]storage.Broker, error)
+	GetBroker(ctx context.Context, id string) (storage.Broker, error)
+	CreateReportImport(ctx context.Context, r storage.ReportImport) (storage.ReportImport, error)
+	GetReportImport(ctx context.Context, id string) (storage.ReportImport, error)
+	ListReportImports(ctx context.Context, portfolioIDs []string) ([]storage.ReportImport, error)
+	UpdateReportImportStatus(ctx context.Context, id, status, errMsg string) (storage.ReportImport, error)
 }
 
-// Server implements portfoliopb.PortfolioServiceServer.
 type Server struct {
 	portfoliopb.UnimplementedPortfolioServiceServer
 
 	Store Store
 	Log   *slog.Logger
+
+	Loc *time.Location
+	Now func() time.Time
 }
 
 func (s *Server) CreatePortfolio(ctx context.Context, req *portfoliopb.CreatePortfolioRequest) (*portfoliopb.Portfolio, error) {
@@ -56,16 +58,62 @@ func (s *Server) CreatePortfolio(ctx context.Context, req *portfoliopb.CreatePor
 	}
 
 	name := strings.TrimSpace(req.GetName())
-	if name == "" {
-		name = "Основной"
+	if utf8.RuneCountInString(name) > maxPortfolioNameLen {
+		return nil, status.Errorf(codes.InvalidArgument, "name must be at most %d characters", maxPortfolioNameLen)
 	}
 
-	p, err := s.Store.CreatePortfolio(ctx, userID, name)
+	var members []string
+	if len(req.GetMemberIds()) > 0 {
+		members, err = s.validateMembers(ctx, userID, req.GetMemberIds())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if name == "" {
+		name = "Основной"
+		if members != nil {
+			name = "Составной"
+		}
+	}
+
+	p, err := s.Store.CreatePortfolio(ctx, userID, name, members)
 	if err != nil {
 		s.Log.Error("create portfolio", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return toPortfolioPB(p), nil
+}
+
+const minCompositeMembers = 2
+
+func (s *Server) validateMembers(ctx context.Context, userID string, ids []string) ([]string, error) {
+	seen := map[string]bool{}
+	var members []string
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		p, err := s.Store.GetPortfolio(ctx, id)
+		if errors.Is(err, storage.ErrNotFound) || (err == nil && p.UserID != userID) {
+			return nil, status.Error(codes.NotFound, "Портфель для составного не найден")
+		}
+		if err != nil {
+			s.Log.Error("get member portfolio", "error", err)
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+		if p.Composite() {
+			return nil, status.Error(codes.InvalidArgument, "Составной портфель нельзя включить в другой составной")
+		}
+		members = append(members, p.ID)
+	}
+	if len(members) < minCompositeMembers {
+		return nil, status.Errorf(codes.InvalidArgument, "Выберите хотя бы %d портфеля", minCompositeMembers)
+	}
+	return members, nil
 }
 
 func (s *Server) ListPortfolios(ctx context.Context, _ *emptypb.Empty) (*portfoliopb.ListPortfoliosResponse, error) {
@@ -94,13 +142,38 @@ func (s *Server) GetPortfolio(ctx context.Context, req *portfoliopb.GetPortfolio
 	return toPortfolioPB(p), nil
 }
 
+const maxPortfolioNameLen = 100
+
+func (s *Server) UpdatePortfolio(ctx context.Context, req *portfoliopb.UpdatePortfolioRequest) (*portfoliopb.Portfolio, error) {
+	name := strings.TrimSpace(req.GetName())
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if utf8.RuneCountInString(name) > maxPortfolioNameLen {
+		return nil, status.Errorf(codes.InvalidArgument, "name must be at most %d characters", maxPortfolioNameLen)
+	}
+
+	if _, err := s.loadOwnedPortfolio(ctx, req.GetId()); err != nil {
+		return nil, err
+	}
+
+	p, err := s.Store.RenamePortfolio(ctx, req.GetId(), name)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, status.Error(codes.NotFound, "portfolio not found")
+	}
+	if err != nil {
+		s.Log.Error("rename portfolio", "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	return toPortfolioPB(p), nil
+}
+
 func (s *Server) CreateTrade(ctx context.Context, req *portfoliopb.CreateTradeRequest) (*portfoliopb.Trade, error) {
-	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
+	p, err := s.loadWritablePortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
 		return nil, err
 	}
 
-	// Same rules as the batch RPCs (validateTrade) - one place to change.
 	t, err := s.validateTrade(&portfoliopb.TradeInput{
 		Secid:      req.GetSecid(),
 		Board:      req.GetBoard(),
@@ -118,17 +191,12 @@ func (s *Server) CreateTrade(ctx context.Context, req *portfoliopb.CreateTradeRe
 
 	trade, err := s.Store.CreateTrade(ctx, t)
 	if err != nil {
-		// The old HTTP API used 422 Unprocessable Entity for an unknown
-		// instrument, which has no exact gRPC equivalent; FailedPrecondition
-		// is the closest standard code (see insertError).
+
 		return nil, s.insertError("create trade", err)
 	}
 	return toTradePB(trade), nil
 }
 
-// validateTrade applies the same rules CreateTrade applies to a single
-// trade, returning a ready gRPC error on failure. Shared by CreateTrade
-// and CreateTrades so the batch endpoint can't be used to bypass them.
 func (s *Server) validateTrade(t *portfoliopb.TradeInput) (storage.Trade, error) {
 	side := strings.ToLower(strings.TrimSpace(t.GetSide()))
 	if side != "buy" && side != "sell" {
@@ -163,18 +231,13 @@ func (s *Server) validateTrade(t *portfoliopb.TradeInput) (storage.Trade, error)
 
 		AccruedInterest: t.GetAccruedInterest(),
 		ExternalID:      strings.TrimSpace(t.GetExternalId()),
+		SecurityName:    strings.TrimSpace(t.GetSecurityName()),
+		ISIN:            strings.ToUpper(strings.TrimSpace(t.GetIsin())),
 	}, nil
 }
 
-// CreateTrades is the batch counterpart of CreateTrade: all trades are
-// validated up front, then inserted in one DB transaction - all or
-// nothing. This is what the parser service calls after parsing a whole
-// broker report, so a retry of the task can't leave half the batch
-// applied (the old per-trade loop could, which made requeueing a task
-// duplicate already-created trades). Response order matches request
-// order.
 func (s *Server) CreateTrades(ctx context.Context, req *portfoliopb.CreateTradesRequest) (*portfoliopb.CreateTradesResponse, error) {
-	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
+	p, err := s.loadWritablePortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +259,7 @@ func (s *Server) CreateTrades(ctx context.Context, req *portfoliopb.CreateTrades
 
 	created, err := s.Store.CreateTradesBatch(ctx, stored)
 	if err != nil {
-		// Same semantics as CreateTrade; nothing was inserted (single
-		// transaction).
+
 		return nil, s.insertError("create trades batch", err)
 	}
 
@@ -213,7 +275,7 @@ func (s *Server) ListTrades(ctx context.Context, req *portfoliopb.ListTradesRequ
 	if err != nil {
 		return nil, err
 	}
-	trades, err := s.Store.ListTrades(ctx, p.ID)
+	trades, err := s.Store.ListTrades(ctx, p.SourceIDs())
 	if err != nil {
 		s.Log.Error("list trades", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")
@@ -260,14 +322,10 @@ func (s *Server) GetPnL(ctx context.Context, req *portfoliopb.GetPnLRequest) (*p
 		TotalOther:           summary.TotalOther,
 		NetDeposits:          summary.NetDeposits,
 		CashBalance:          summary.CashBalance,
+		TotalDayChange:       summary.TotalDayChange,
 	}, nil
 }
 
-// loadOwnedPortfolio loads the portfolio with the given id and checks it
-// belongs to the caller (from ctx's x-user-id metadata). A portfolio that
-// doesn't exist and a portfolio that exists but belongs to someone else
-// are deliberately indistinguishable to the caller (both NotFound) - see
-// the old httpapi.loadOwnedPortfolio this replaces.
 func (s *Server) loadOwnedPortfolio(ctx context.Context, id string) (storage.Portfolio, error) {
 	userID, err := authmd.UserID(ctx)
 	if err != nil {
@@ -285,53 +343,99 @@ func (s *Server) loadOwnedPortfolio(ctx context.Context, id string) (storage.Por
 	return p, nil
 }
 
-func (s *Server) computePnL(ctx context.Context, portfolioID string) (pnl.Summary, error) {
+func (s *Server) loadWritablePortfolio(ctx context.Context, id string) (storage.Portfolio, error) {
+	p, err := s.loadOwnedPortfolio(ctx, id)
+	if err != nil {
+		return storage.Portfolio{}, err
+	}
+	if p.Composite() {
+		return storage.Portfolio{}, status.Error(codes.FailedPrecondition,
+			"Составной портфель собирается из других портфелей — загрузите отчёт в один из них")
+	}
+	return p, nil
+}
+
+type ledger struct {
+	trades []pnl.Trade
+	cash   []pnl.CashFlow
+}
+
+type book struct {
+	ledgers     []ledger
+	instruments [][2]string
+	prices      map[string]float64
+}
+
+func (s *Server) loadBook(ctx context.Context, portfolioID string) (book, error) {
 	p, err := s.loadOwnedPortfolio(ctx, portfolioID)
+	if err != nil {
+		return book{}, err
+	}
+
+	var b book
+	seen := map[[2]string]bool{}
+	for _, id := range p.SourceIDs() {
+		storedTrades, err := s.Store.ListTrades(ctx, []string{id})
+		if err != nil {
+			s.Log.Error("list trades", "error", err)
+			return book{}, status.Error(codes.Internal, "internal error")
+		}
+		storedCash, err := s.Store.ListCashOperations(ctx, []string{id})
+		if err != nil {
+			s.Log.Error("list cash operations", "error", err)
+			return book{}, status.Error(codes.Internal, "internal error")
+		}
+
+		var l ledger
+		l.cash = make([]pnl.CashFlow, 0, len(storedCash))
+		for _, c := range storedCash {
+			l.cash = append(l.cash, pnl.CashFlow{
+				Type: c.Type, Amount: c.Amount, SecID: c.SecID, Board: c.Board, OccurredAt: c.OccurredAt,
+			})
+		}
+		l.trades = make([]pnl.Trade, 0, len(storedTrades))
+		for _, t := range storedTrades {
+			l.trades = append(l.trades, pnl.Trade{
+				SecID: t.SecID, Board: t.Board, Side: pnl.TradeSide(t.Side),
+				Quantity: t.Quantity, Price: t.Price, Fee: t.Fee, ExecutedAt: t.ExecutedAt,
+				AccruedInterest: t.AccruedInterest,
+			})
+			key := [2]string{t.SecID, t.Board}
+			if !seen[key] {
+				seen[key] = true
+				b.instruments = append(b.instruments, key)
+			}
+		}
+		b.ledgers = append(b.ledgers, l)
+	}
+
+	b.prices, err = s.Store.LatestPrices(ctx, b.instruments)
+	if err != nil {
+		s.Log.Error("latest prices", "error", err)
+		return book{}, status.Error(codes.Internal, "internal error")
+	}
+	return b, nil
+}
+
+func (s *Server) computePnL(ctx context.Context, portfolioID string) (pnl.Summary, error) {
+	b, err := s.loadBook(ctx, portfolioID)
 	if err != nil {
 		return pnl.Summary{}, err
 	}
 
-	storedTrades, err := s.Store.ListTrades(ctx, p.ID)
+	prevCloses, err := s.Store.PrevCloses(ctx, b.instruments)
 	if err != nil {
-		s.Log.Error("list trades", "error", err)
+		s.Log.Error("prev closes", "error", err)
 		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
 	}
 
-	storedCash, err := s.Store.ListCashOperations(ctx, p.ID)
-	if err != nil {
-		s.Log.Error("list cash operations", "error", err)
-		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
+	summaries := make([]pnl.Summary, 0, len(b.ledgers))
+	for _, l := range b.ledgers {
+		summary := pnl.Compute(l.trades, l.cash, b.prices)
+		pnl.ApplyDayChange(&summary, prevCloses)
+		summaries = append(summaries, summary)
 	}
-	cash := make([]pnl.CashFlow, 0, len(storedCash))
-	for _, c := range storedCash {
-		cash = append(cash, pnl.CashFlow{
-			Type: c.Type, Amount: c.Amount, SecID: c.SecID, Board: c.Board, OccurredAt: c.OccurredAt,
-		})
-	}
-
-	trades := make([]pnl.Trade, 0, len(storedTrades))
-	seen := map[[2]string]bool{}
-	var instruments [][2]string
-	for _, t := range storedTrades {
-		trades = append(trades, pnl.Trade{
-			SecID: t.SecID, Board: t.Board, Side: pnl.TradeSide(t.Side),
-			Quantity: t.Quantity, Price: t.Price, Fee: t.Fee, ExecutedAt: t.ExecutedAt,
-			AccruedInterest: t.AccruedInterest,
-		})
-		key := [2]string{t.SecID, t.Board}
-		if !seen[key] {
-			seen[key] = true
-			instruments = append(instruments, key)
-		}
-	}
-
-	prices, err := s.Store.LatestPrices(ctx, instruments)
-	if err != nil {
-		s.Log.Error("latest prices", "error", err)
-		return pnl.Summary{}, status.Error(codes.Internal, "internal error")
-	}
-
-	return pnl.Compute(trades, cash, prices), nil
+	return pnl.Merge(summaries), nil
 }
 
 func toPortfolioPB(p storage.Portfolio) *portfoliopb.Portfolio {
@@ -340,6 +444,7 @@ func toPortfolioPB(p storage.Portfolio) *portfoliopb.Portfolio {
 		Name:      p.Name,
 		CreatedAt: timestamppb.New(p.CreatedAt),
 		UpdatedAt: timestamppb.New(p.UpdatedAt),
+		MemberIds: p.MemberIDs,
 	}
 }
 
@@ -383,6 +488,7 @@ func toHoldingPB(i pnl.InstrumentPnL) *portfoliopb.Holding {
 		CurrentPrice:  i.CurrentPrice,
 		MarketValue:   i.MarketValue,
 		UnrealizedPnl: i.UnrealizedPnL,
+		DayChange:     i.DayChange,
 	}
 }
 
@@ -397,10 +503,6 @@ func toInstrumentPB(i pnl.InstrumentPnL) *portfoliopb.InstrumentPnL {
 	}
 }
 
-// insertError maps storage insert errors to gRPC codes.
-// ErrUnknownInstrument -> FailedPrecondition: the request is well-formed,
-// but price_updater hasn't seen this secid/board yet, so the trade can't
-// be linked to it. ErrDuplicate -> AlreadyExists.
 func (s *Server) insertError(op string, err error) error {
 	switch {
 	case errors.Is(err, storage.ErrUnknownInstrument):
@@ -444,10 +546,8 @@ func validateCashOperation(c *portfoliopb.CashOperationInput) (storage.CashOpera
 	}, nil
 }
 
-// ImportReport stores a parsed broker report: trades + cash operations,
-// one transaction, rows with an already-stored external_id skipped.
 func (s *Server) ImportReport(ctx context.Context, req *portfoliopb.ImportReportRequest) (*portfoliopb.ImportReportResponse, error) {
-	p, err := s.loadOwnedPortfolio(ctx, req.GetPortfolioId())
+	p, err := s.loadWritablePortfolio(ctx, req.GetPortfolioId())
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +574,25 @@ func (s *Server) ImportReport(ctx context.Context, req *portfoliopb.ImportReport
 		cash = append(cash, c)
 	}
 
-	res, err := s.Store.ImportReport(ctx, p.ID, trades, cash)
+	importID := strings.TrimSpace(req.GetReportImportId())
+	if importID != "" {
+
+		imp, err := s.Store.GetReportImport(ctx, importID)
+		if errors.Is(err, storage.ErrNotFound) || (err == nil && imp.PortfolioID != p.ID) {
+			return nil, status.Error(codes.NotFound, "report import not found")
+		}
+		if err != nil {
+			s.Log.Error("get report import", "error", err)
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	var opening *storage.OpeningScope
+	if key := strings.TrimSpace(req.GetAccountKey()); key != "" && req.GetPeriodStart() != nil {
+		opening = &storage.OpeningScope{AccountKey: key, PeriodStart: req.GetPeriodStart().AsTime()}
+	}
+
+	res, err := s.Store.ImportReport(ctx, p.ID, importID, trades, cash, opening)
 	if err != nil {
 		return nil, s.insertError("import report", err)
 	}
@@ -491,7 +609,7 @@ func (s *Server) ListCashOperations(ctx context.Context, req *portfoliopb.ListCa
 	if err != nil {
 		return nil, err
 	}
-	ops, err := s.Store.ListCashOperations(ctx, p.ID)
+	ops, err := s.Store.ListCashOperations(ctx, p.SourceIDs())
 	if err != nil {
 		s.Log.Error("list cash operations", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")

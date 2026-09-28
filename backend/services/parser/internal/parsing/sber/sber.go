@@ -1,21 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 package sber
 
 import (
@@ -25,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -38,18 +21,11 @@ import (
 	"invest/backend/services/parser/internal/task"
 )
 
-
-
 const BrokerKey = "sber"
-
-
 
 var ErrNotSberReport = errors.New("sber: file is not a Sberbank HTML broker report")
 
-
-
 var moscow = time.FixedZone("MSK", 3*60*60)
-
 
 type Parser struct{}
 
@@ -57,14 +33,15 @@ func (Parser) Parse(_ task.ReportUploaded, data []byte) (parsing.Report, error) 
 	return Parse(data)
 }
 
-
 var (
 	headTrades    = normKey("Сделки купли/продажи ценных бумаг")
 	headCash      = normKey("Движение денежных средств за период")
 	headSecurites = normKey("Справочник Ценных Бумаг")
+	headPayouts   = normKey("Выплаты дохода от эмитента на внешний счет")
 	headTitle     = normKey("Отчет брокера")
+	headHoldings  = normKey("Портфель Ценных Бумаг")
+	headCashBal   = normKey("Денежные средства")
 )
-
 
 func Parse(data []byte) (parsing.Report, error) {
 	doc, err := html.Parse(bytes.NewReader(toUTF8(data)))
@@ -89,26 +66,50 @@ func Parse(data []byte) (parsing.Report, error) {
 	if err != nil {
 		return parsing.Report{}, err
 	}
-	return parsing.Report{Trades: trades, CashOperations: cash}, nil
+	payouts, err := parseExternalPayouts(d.sections[headPayouts], ref, d.account)
+	if err != nil {
+		return parsing.Report{}, err
+	}
+	cash = append(cash, payouts...)
+
+	report := parsing.Report{Trades: trades, CashOperations: cash}
+	if d.account != "" {
+		report.AccountKey = "sber:" + d.account
+	}
+	if d.periodStart != nil && report.AccountKey != "" {
+		report.PeriodStart = d.periodStart
+		var holdings [][]row
+		for key, tables := range d.sections {
+			if strings.HasPrefix(key, headHoldings) {
+				holdings = append(holdings, tables...)
+			}
+		}
+		oTrades, oCash, err := parseOpening(holdings, d.sections[headCashBal], ref, report.AccountKey, *d.periodStart)
+		if err != nil {
+			return parsing.Report{}, err
+		}
+		report.Trades = append(report.Trades, oTrades...)
+		report.CashOperations = append(report.CashOperations, oCash...)
+	}
+	return report, nil
 }
-
-
-
 
 type row struct {
 	cells  []string
-	header bool 
+	header bool
 }
 
 type document struct {
-	hasTitle bool
-	account  string 
-	
-	
+	hasTitle    bool
+	account     string
+	periodStart *time.Time
+
 	sections map[string][][]row
 }
 
 var reAccountInTitle = regexp.MustCompile(`(?i)отчет брокера\s+(\S+)`)
+
+var rePeriod = regexp.MustCompile(`(?i)за период с\s+(\d{2}\.\d{2}\.\d{4})\s+по\s+(\d{2}\.\d{2}\.\d{4})`)
 
 func collect(root *html.Node) document {
 	d := document{sections: map[string][][]row{}}
@@ -127,6 +128,16 @@ func collect(root *html.Node) document {
 					}
 				}
 				return
+			case "h1", "h2", "h3":
+				if m := rePeriod.FindStringSubmatch(collapse(textOf(n))); m != nil && d.periodStart == nil {
+					if t, err := parseDate(m[1]); err == nil {
+						d.periodStart = &t
+					}
+				}
+				if strings.HasPrefix(normKey(textOf(n)), headTitle) {
+					d.hasTitle = true
+				}
+				return
 			case "p":
 				if h := normKey(textOf(n)); h != "" {
 					current = h
@@ -137,7 +148,7 @@ func collect(root *html.Node) document {
 				return
 			case "table":
 				d.sections[current] = append(d.sections[current], readTable(n))
-				return 
+				return
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -201,9 +212,6 @@ func hasClass(n *html.Node, class string) bool {
 	return false
 }
 
-
-
-
 type columns map[string]int
 
 func headerOf(rows []row) (columns, bool) {
@@ -240,9 +248,6 @@ func (c columns) get(r row, name string) string {
 	return r.cells[i]
 }
 
-
-
-
 func dataRows(rows []row, width int) []row {
 	var out []row
 	for _, r := range rows {
@@ -257,19 +262,16 @@ func dataRows(rows []row, width int) []row {
 	return out
 }
 
-
-
-
 type security struct {
 	Name  string
-	Code  string 
+	Code  string
 	ISIN  string
-	Kind  string 
+	Kind  string
 	Board string
 }
 
 type reference struct {
-	byCode map[string]*security 
+	byCode map[string]*security
 	all    []*security
 }
 
@@ -307,10 +309,6 @@ func parseReference(tables [][]row) (*reference, error) {
 	return ref, nil
 }
 
-
-
-
-
 func boardFor(kind string) string {
 	k := strings.ToLower(kind)
 	switch {
@@ -342,9 +340,6 @@ func (r *reference) lookup(code, name string) (*security, error) {
 	return nil, fmt.Errorf("sber: security %q (%s) not found in the report's securities reference", name, code)
 }
 
-
-
-
 func (r *reference) findInText(s string) *security {
 	var best *security
 	for _, sec := range r.all {
@@ -354,8 +349,6 @@ func (r *reference) findInText(s string) *security {
 	}
 	return best
 }
-
-
 
 func containsWord(s, name string) bool {
 	for from := 0; ; {
@@ -374,9 +367,6 @@ func containsWord(s, name string) bool {
 		from = from + i + 1
 	}
 }
-
-
-
 
 func parseTrades(tables [][]row, ref *reference, account string) ([]parsing.Trade, error) {
 	var out []parsing.Trade
@@ -451,20 +441,17 @@ func parseTradeRow(cols columns, r row, ref *reference, account string) (parsing
 		Board:    sec.Board,
 		Side:     side,
 		Quantity: qty,
-		
-		
-		
+
 		Price:           round(nums["Сумма"]/qty, 6),
 		Fee:             round(nums["Комиссия Брокера"]+nums["Комиссия Биржи"], 2),
 		AccruedInterest: nums["НКД"],
 		Currency:        strings.ToUpper(cols.get(r, "Валюта")),
 		ExecutedAt:      &executedAt,
 		ExternalID:      "sber:" + account + ":trade:" + dealNo,
+		SecurityName:    sec.Name,
+		ISIN:            sec.ISIN,
 	}, nil
 }
-
-
-
 
 func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOperation, error) {
 	var out []parsing.CashOperation
@@ -513,12 +500,6 @@ func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOp
 				}
 			}
 
-			
-			
-			
-			
-			
-			
 			key := strings.Join([]string{account, date.Format("2006-01-02"), op.Currency, desc, strconv.FormatFloat(amount, 'f', 2, 64)}, "|")
 			n := seen[key]
 			seen[key]++
@@ -531,9 +512,232 @@ func parseCash(tables [][]row, ref *reference, account string) ([]parsing.CashOp
 	return out, nil
 }
 
+func parseExternalPayouts(tables [][]row, ref *reference, account string) ([]parsing.CashOperation, error) {
+	var out []parsing.CashOperation
+	seen := map[string]int{}
+	for _, rows := range tables {
+		cols, ok := headerOf(rows)
+		if !ok {
+			continue
+		}
+		if err := cols.require("Дата", "Описание операции", "Валюта", "Сумма"); err != nil {
+			return nil, err
+		}
+		for _, r := range dataRows(rows, len(cols)) {
+			desc := cols.get(r, "Описание операции")
+			date, err := parseDate(cols.get(r, "Дата"))
+			if err != nil {
+				return nil, fmt.Errorf("sber: external payout %q: %w", desc, err)
+			}
+			amount, err := parseNumber(cols.get(r, "Сумма"))
+			if err != nil {
+				return nil, fmt.Errorf("sber: external payout %q: %w", desc, err)
+			}
+			amount = round(amount, 2)
+			if amount <= 0 {
+				continue
+			}
+			typ, _ := classify(desc, amount)
+			switch typ {
+			case parsing.CashDividend, parsing.CashCoupon, parsing.CashRedemption:
+			default:
+				typ = parsing.CashOther
+			}
+			currency := strings.ToUpper(cols.get(r, "Валюта"))
 
+			key := strings.Join([]string{account, date.Format("2006-01-02"), currency, desc, strconv.FormatFloat(amount, 'f', 2, 64)}, "|")
+			n := seen[key]
+			seen[key]++
+			id := func(tag string) string {
+				sum := sha1.Sum([]byte(fmt.Sprintf("%s|%s#%d", tag, key, n)))
+				return "sber:" + account + ":" + tag + ":" + hex.EncodeToString(sum[:12])
+			}
 
+			income := parsing.CashOperation{
+				Type:        typ,
+				Amount:      amount,
+				Currency:    currency,
+				Date:        date,
+				Description: desc + " (на внешний счёт)",
+				ExternalID:  id("payout"),
+			}
+			if sec := ref.findInText(desc); sec != nil {
+				income.SecID, income.Board = sec.Code, sec.Board
+			}
+			out = append(out, income, parsing.CashOperation{
+				Type:        parsing.CashWithdrawal,
+				Amount:      -amount,
+				Currency:    currency,
+				Date:        date,
+				Description: "Выплата на внешний счёт: " + desc,
+				ExternalID:  id("payout-out"),
+			})
+		}
+	}
+	return out, nil
+}
 
+func parseOpening(holdings, cashTables [][]row, ref *reference, accountKey string, start time.Time) ([]parsing.Trade, []parsing.CashOperation, error) {
+	prefix := accountKey + parsing.OpeningMarker + start.Format("2006-01-02") + ":"
+	dateText := start.Format("02.01.2006")
+
+	var trades []parsing.Trade
+	costs := map[string]float64{}
+	for _, rows := range holdings {
+		hdr, ok := namedHeader(rows, "Наименование")
+		if !ok {
+			continue
+		}
+		idx := firstIndexes(hdr.cells)
+		for _, name := range []string{"Наименование", "ISIN ценной бумаги", "Валюта рыночной цены", "Количество, шт", "Рыночная стоимость, без НКД", "НКД"} {
+			if _, ok := idx[normKey(name)]; !ok {
+				return nil, nil, fmt.Errorf("sber: securities portfolio table layout changed, missing column %q", name)
+			}
+		}
+		get := func(r row, name string) string {
+			i := idx[normKey(name)]
+			if i >= len(r.cells) {
+				return ""
+			}
+			return r.cells[i]
+		}
+		for _, r := range rows {
+			if r.header || len(r.cells) != len(hdr.cells) {
+				continue
+			}
+			name, isin := get(r, "Наименование"), strings.ToUpper(get(r, "ISIN ценной бумаги"))
+			if name == "" || isin == "" || isColumnNumber(name) {
+				continue
+			}
+			qty, err := parseNumber(get(r, "Количество, шт"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			if qty <= 0 {
+				continue
+			}
+			value, err := parseNumber(get(r, "Рыночная стоимость, без НКД"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			accrued, err := parseNumber(get(r, "НКД"))
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening position %s: %w", name, err)
+			}
+			sec, err := ref.lookup(isin, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			currency := strings.ToUpper(get(r, "Валюта рыночной цены"))
+			if currency == "" {
+				currency = "RUB"
+			}
+			at := start
+			trades = append(trades, parsing.Trade{
+				SecID:           sec.Code,
+				Board:           sec.Board,
+				Side:            "buy",
+				Quantity:        qty,
+				Price:           round(value/qty, 6),
+				AccruedInterest: round(accrued, 2),
+				Currency:        currency,
+				ExecutedAt:      &at,
+				ExternalID:      prefix + "position:" + isin,
+				SecurityName:    sec.Name,
+				ISIN:            sec.ISIN,
+			})
+			costs[currency] += value + accrued
+		}
+	}
+
+	var cash []parsing.CashOperation
+	for _, currency := range sortedKeys(costs) {
+		amount := round(costs[currency], 2)
+		if amount <= 0 {
+			continue
+		}
+		cash = append(cash, parsing.CashOperation{
+			Type:        parsing.CashDeposit,
+			Amount:      amount,
+			Currency:    currency,
+			Date:        start,
+			Description: "Вводный остаток: бумаги на " + dateText,
+			ExternalID:  prefix + "securities:" + currency,
+		})
+	}
+
+	balances := map[string]float64{}
+	for _, rows := range cashTables {
+		hdr, ok := namedHeader(rows, "Торговая площадка")
+		if !ok {
+			continue
+		}
+		idx := firstIndexes(hdr.cells)
+		ci, okC := idx[normKey("Валюта")]
+		si, okS := idx[normKey("Начало периода")]
+		if !okC || !okS {
+			return nil, nil, fmt.Errorf("sber: cash balance table layout changed")
+		}
+		for _, r := range rows {
+			if r.header || len(r.cells) != len(hdr.cells) || !strings.HasPrefix(strings.ToLower(r.cells[0]), "торговый счет") {
+				continue
+			}
+			v, err := parseNumber(r.cells[si])
+			if err != nil {
+				return nil, nil, fmt.Errorf("sber: opening cash: %w", err)
+			}
+			balances[strings.ToUpper(r.cells[ci])] += v
+		}
+	}
+	for _, currency := range sortedKeys(balances) {
+		amount := round(balances[currency], 2)
+		if amount == 0 {
+			continue
+		}
+		typ := parsing.CashDeposit
+		if amount < 0 {
+			typ = parsing.CashWithdrawal
+		}
+		cash = append(cash, parsing.CashOperation{
+			Type:        typ,
+			Amount:      amount,
+			Currency:    currency,
+			Date:        start,
+			Description: "Вводный остаток: деньги на " + dateText,
+			ExternalID:  prefix + "cash:" + currency,
+		})
+	}
+	return trades, cash, nil
+}
+
+func namedHeader(rows []row, first string) (row, bool) {
+	for _, r := range rows {
+		if r.header && len(r.cells) > 0 && normKey(r.cells[0]) == normKey(first) {
+			return r, true
+		}
+	}
+	return row{}, false
+}
+
+func firstIndexes(cells []string) map[string]int {
+	idx := map[string]int{}
+	for i, c := range cells {
+		k := normKey(c)
+		if _, ok := idx[k]; !ok {
+			idx[k] = i
+		}
+	}
+	return idx
+}
+
+func sortedKeys(m map[string]float64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 func classify(desc string, amount float64) (typ string, skip bool) {
 	d := strings.ToLower(desc)
@@ -558,8 +762,7 @@ func classify(desc string, amount float64) (typ string, skip bool) {
 		strings.Contains(d, "пополнение"),
 		strings.Contains(d, ", qr"),
 		strings.Contains(d, "перевод"):
-		
-		
+
 		if amount > 0 {
 			return parsing.CashDeposit, false
 		}
@@ -567,9 +770,6 @@ func classify(desc string, amount float64) (typ string, skip bool) {
 	}
 	return parsing.CashOther, false
 }
-
-
-
 
 func parseDate(s string) (time.Time, error) {
 	t, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(s), moscow)
@@ -588,8 +788,6 @@ func parseDateTime(date, clock string) (time.Time, error) {
 }
 
 var numberCleaner = strings.NewReplacer(" ", "", " ", "", " ", "", ",", ".")
-
-
 
 func parseNumber(s string) (float64, error) {
 	s = numberCleaner.Replace(strings.TrimSpace(s))
@@ -613,8 +811,6 @@ func round(v float64, digits int) float64 {
 }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
-
-
 
 func normKey(s string) string {
 	var b strings.Builder
@@ -641,8 +837,6 @@ func isColumnNumber(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
 }
-
-
 
 func toUTF8(data []byte) []byte {
 	if utf8.Valid(data) {

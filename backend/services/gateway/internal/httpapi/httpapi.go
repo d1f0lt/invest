@@ -46,21 +46,43 @@ func NewMux(h *Handlers) http.Handler {
 	mux.HandleFunc("POST /api/v1/logout", h.handleLogout)
 
 	mux.HandleFunc("GET /api/v1/me", h.requireAuth(h.handleMe))
+	mux.HandleFunc("PATCH /api/v1/me", h.requireAuth(h.handleUpdateMe))
+	mux.HandleFunc("DELETE /api/v1/me", h.requireAuth(h.handleDeleteMe))
+	mux.HandleFunc("POST /api/v1/me/password", h.requireAuth(h.handleChangePassword))
 	mux.HandleFunc("GET /api/v1/users/{id}", h.requireAuth(h.handleGetUser))
 
 	mux.HandleFunc("GET /api/v1/prices", h.requireAuth(h.handleGetPrices))
 	mux.HandleFunc("GET /api/v1/prices/{secid}/candles", h.requireAuth(h.handleGetCandles))
+	mux.HandleFunc("GET /api/v1/securities", h.requireAuth(h.handleSearchSecurities))
+	mux.HandleFunc("GET /api/v1/securities/{secid}/info", h.requireAuth(h.handleGetSecurityInfo))
+	mux.HandleFunc("GET /api/v1/securities/{secid}/dividends", h.requireAuth(h.handleGetDividends))
 
 	mux.HandleFunc("POST /api/v1/portfolios", h.requireAuth(h.handleCreatePortfolio))
 	mux.HandleFunc("GET /api/v1/portfolios", h.requireAuth(h.handleListPortfolios))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}", h.requireAuth(h.handleGetPortfolio))
+	mux.HandleFunc("PATCH /api/v1/portfolios/{id}", h.requireAuth(h.handleUpdatePortfolio))
 	mux.HandleFunc("POST /api/v1/portfolios/{id}/trades", h.requireAuth(h.handleCreateTrade))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/trades", h.requireAuth(h.handleListTrades))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/holdings", h.requireAuth(h.handleGetHoldings))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/pnl", h.requireAuth(h.handleGetPnL))
+	mux.HandleFunc("GET /api/v1/portfolios/{id}/history", h.requireAuth(h.handleGetValueHistory))
 	mux.HandleFunc("GET /api/v1/portfolios/{id}/cash-operations", h.requireAuth(h.handleListCashOperations))
 
+	mux.HandleFunc("GET /api/v1/brokers", h.requireAuth(h.handleListBrokers))
+	mux.HandleFunc("GET /static/brokers/{file}", handleBrokerIcon)
+
 	mux.HandleFunc("POST /api/v1/portfolios/{id}/reports", h.requireAuth(h.Reports.Upload))
+	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports", h.requireAuth(h.Reports.List))
+	mux.HandleFunc("GET /api/v1/portfolios/{id}/reports/{report_id}", h.requireAuth(h.Reports.Get))
+
+	mux.HandleFunc("POST /api/v1/alerts", h.requireAuth(h.handleCreateAlert))
+	mux.HandleFunc("GET /api/v1/alerts", h.requireAuth(h.handleListAlerts))
+	mux.HandleFunc("PUT /api/v1/alerts/{id}", h.requireAuth(h.handleUpdateAlert))
+	mux.HandleFunc("DELETE /api/v1/alerts/{id}", h.requireAuth(h.handleDeleteAlert))
+
+	mux.HandleFunc("POST /api/v1/telegram/link", h.requireAuth(h.handleCreateTelegramLink))
+	mux.HandleFunc("GET /api/v1/telegram", h.requireAuth(h.handleGetTelegramLink))
+	mux.HandleFunc("DELETE /api/v1/telegram", h.requireAuth(h.handleDeleteTelegramLink))
 
 	return mux
 }
@@ -125,6 +147,8 @@ func writeUpstreamError(w http.ResponseWriter, log *slog.Logger, err error) {
 	case codes.Unauthenticated:
 
 		writeError(w, http.StatusUnauthorized, st.Message())
+	case codes.PermissionDenied:
+		writeError(w, http.StatusForbidden, st.Message())
 	case codes.NotFound:
 		writeError(w, http.StatusNotFound, st.Message())
 	case codes.AlreadyExists:

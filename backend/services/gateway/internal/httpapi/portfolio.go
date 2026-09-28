@@ -12,7 +12,12 @@ import (
 )
 
 type createPortfolioRequest struct {
-	Name string `json:"name,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	MemberIDs []string `json:"member_ids,omitempty"`
+}
+
+type updatePortfolioRequest struct {
+	Name string `json:"name"`
 }
 
 type portfolioResponse struct {
@@ -20,6 +25,7 @@ type portfolioResponse struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	MemberIDs []string  `json:"member_ids,omitempty"`
 }
 
 func toPortfolioResponse(p *portfoliopb.Portfolio) portfolioResponse {
@@ -28,6 +34,7 @@ func toPortfolioResponse(p *portfoliopb.Portfolio) portfolioResponse {
 		Name:      p.GetName(),
 		CreatedAt: p.GetCreatedAt().AsTime(),
 		UpdatedAt: p.GetUpdatedAt().AsTime(),
+		MemberIDs: p.GetMemberIds(),
 	}
 }
 
@@ -94,12 +101,14 @@ type holdingResponse struct {
 	CurrentPrice  *float64 `json:"current_price,omitempty"`
 	MarketValue   *float64 `json:"market_value,omitempty"`
 	UnrealizedPnL *float64 `json:"unrealized_pnl,omitempty"`
+	DayChange     *float64 `json:"day_change,omitempty"`
 }
 
 func toHoldingResponse(h *portfoliopb.Holding) holdingResponse {
 	return holdingResponse{
 		SecID: h.GetSecid(), Board: h.GetBoard(), Quantity: h.GetQuantity(), AvgCost: h.GetAvgCost(),
 		CurrentPrice: h.CurrentPrice, MarketValue: h.MarketValue, UnrealizedPnL: h.UnrealizedPnl,
+		DayChange: h.DayChange,
 	}
 }
 
@@ -136,6 +145,7 @@ type pnlSummaryResponse struct {
 	TotalOther           float64                 `json:"total_other"`
 	NetDeposits          float64                 `json:"net_deposits"`
 	CashBalance          float64                 `json:"cash_balance"`
+	TotalDayChange       float64                 `json:"total_day_change"`
 }
 
 func toPnLSummaryResponse(s *portfoliopb.PnLSummary) pnlSummaryResponse {
@@ -156,6 +166,7 @@ func toPnLSummaryResponse(s *portfoliopb.PnLSummary) pnlSummaryResponse {
 		TotalOther:           s.GetTotalOther(),
 		NetDeposits:          s.GetNetDeposits(),
 		CashBalance:          s.GetCashBalance(),
+		TotalDayChange:       s.GetTotalDayChange(),
 	}
 }
 
@@ -170,12 +181,37 @@ func (h *Handlers) handleCreatePortfolio(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	p, err := h.Upstream.Portfolio.CreatePortfolio(ctx, &portfoliopb.CreatePortfolioRequest{Name: req.Name})
+	p, err := h.Upstream.Portfolio.CreatePortfolio(ctx, &portfoliopb.CreatePortfolioRequest{
+		Name:      req.Name,
+		MemberIds: req.MemberIDs,
+	})
 	if err != nil {
 		writeUpstreamError(w, h.Log, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPortfolioResponse(p))
+}
+
+func (h *Handlers) handleUpdatePortfolio(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	ctx, cancel := h.callCtx(r)
+	defer cancel()
+	ctx = auth.WithUserID(ctx, userID)
+
+	var req updatePortfolioRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	p, err := h.Upstream.Portfolio.UpdatePortfolio(ctx, &portfoliopb.UpdatePortfolioRequest{
+		Id:   r.PathValue("id"),
+		Name: req.Name,
+	})
+	if err != nil {
+		writeUpstreamError(w, h.Log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toPortfolioResponse(p))
 }
 
 func (h *Handlers) handleListPortfolios(w http.ResponseWriter, r *http.Request) {

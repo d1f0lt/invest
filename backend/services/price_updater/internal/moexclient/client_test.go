@@ -173,3 +173,38 @@ func TestMarketFor(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchBoardPrevClose(t *testing.T) {
+	const body = `{
+  "securities": {
+    "columns": ["SECID","BOARDID","SHORTNAME","PREVPRICE","PREVLEGALCLOSEPRICE"],
+    "data": [
+      ["SBER","TQBR","Сбербанк",279.1,279.33],
+      ["GAZP","TQBR","ГАЗПРОМ ао",150.2,null],
+      ["NONE","TQBR","Нет",null,0]
+    ]
+  },
+  "marketdata": {
+    "columns": ["SECID","BOARDID","LAST","TRADINGSTATUS"],
+    "data": [["SBER","TQBR",277.49,"T"],["GAZP","TQBR",151,"T"],["NONE","TQBR",1,"T"]]
+  }
+}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	snap, err := New(srv.URL, 0).FetchBoard(context.Background(), "TQBR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := snap.Quotes["SBER"].PrevClose; p == nil || *p != 279.33 {
+		t.Errorf("SBER prev close = %v, want legal close 279.33", p)
+	}
+	if p := snap.Quotes["GAZP"].PrevClose; p == nil || *p != 150.2 {
+		t.Errorf("GAZP prev close = %v, want PREVPRICE fallback 150.2", p)
+	}
+	if p := snap.Quotes["NONE"].PrevClose; p != nil {
+		t.Errorf("NONE prev close = %v, want nil", *p)
+	}
+}

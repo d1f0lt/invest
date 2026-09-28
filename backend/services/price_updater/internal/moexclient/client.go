@@ -32,9 +32,6 @@ type Security struct {
 	LotSize   int64
 	Decimals  int
 
-	
-	
-	
 	FaceValue      *float64
 	PriceInPercent bool
 }
@@ -50,6 +47,7 @@ type MarketQuote struct {
 	VolumeToday   *int64
 	UpdateTime    *string
 	TradingStatus *string
+	PrevClose     *float64
 }
 
 type BoardSnapshot struct {
@@ -68,19 +66,15 @@ type securitiesResponse struct {
 	Marketdata issTable `json:"marketdata"`
 }
 
-
-
-
 var bondBoards = map[string]bool{
-	"TQOB": true, 
-	"TQCB": true, 
-	"TQIR": true, 
-	"TQOD": true, 
-	"TQOE": true, 
-	"TQOY": true, 
-	"TQRD": true, 
+	"TQOB": true,
+	"TQCB": true,
+	"TQIR": true,
+	"TQOD": true,
+	"TQOE": true,
+	"TQOY": true,
+	"TQRD": true,
 }
-
 
 func MarketFor(board string) string {
 	if bondBoards[board] {
@@ -117,10 +111,8 @@ func (c *Client) FetchBoard(ctx context.Context, board string) (BoardSnapshot, e
 	secIdx := columnIndex(parsed.Securities.Columns)
 	mdIdx := columnIndex(parsed.Marketdata.Columns)
 
-	
-	
-	
 	prevPrice := map[string]*float64{}
+	prevClose := map[string]*float64{}
 
 	snapshot := BoardSnapshot{
 		BoardID: board,
@@ -140,6 +132,11 @@ func (c *Client) FetchBoard(ctx context.Context, board string) (BoardSnapshot, e
 		}
 		if sec.SecID == "" {
 			continue
+		}
+		if p := floatPtrAt(row, secIdx, "PREVLEGALCLOSEPRICE"); p != nil && *p > 0 {
+			prevClose[sec.SecID] = p
+		} else if p := floatPtrAt(row, secIdx, "PREVPRICE"); p != nil && *p > 0 {
+			prevClose[sec.SecID] = p
 		}
 		if isBond {
 			sec.FaceValue = floatPtrAt(row, secIdx, "FACEVALUE")
@@ -167,6 +164,7 @@ func (c *Client) FetchBoard(ctx context.Context, board string) (BoardSnapshot, e
 			VolumeToday:   intPtrAt(row, mdIdx, "VOLTODAY"),
 			UpdateTime:    strPtrAt(row, mdIdx, "UPDATETIME"),
 			TradingStatus: strPtrAt(row, mdIdx, "TRADINGSTATUS"),
+			PrevClose:     prevClose[secID],
 		}
 		if isBond && quote.Last == nil {
 			quote.Last = floatPtrAt(row, mdIdx, "LCURRENTPRICE")

@@ -1,11 +1,3 @@
-// Package pnl derives holdings and profit/loss from the portfolio's
-// ledgers (trades + cash operations). Pure functions: no DB, no
-// transport.
-//
-// Method: weighted-average cost per instrument. Total P&L of a
-// portfolio = realized + unrealized trade P&L + income (dividends,
-// coupons, НКД) + taxes/fees/other operations not tied to a trade.
-// Deposits and withdrawals move money but are not profit.
 package pnl
 
 import (
@@ -28,11 +20,10 @@ type Trade struct {
 	Price      float64
 	Fee        float64
 	ExecutedAt time.Time
-	// AccruedInterest (НКД) paid on a buy / received on a sell.
+
 	AccruedInterest float64
 }
 
-// Cash operation types (same values as the cash_operations.type column).
 const (
 	CashDeposit    = "deposit"
 	CashWithdrawal = "withdrawal"
@@ -44,8 +35,6 @@ const (
 	CashOther      = "other"
 )
 
-// CashFlow is a money movement that is not a trade. Amount is signed:
-// > 0 in, < 0 out.
 type CashFlow struct {
 	Type       string
 	Amount     float64
@@ -68,15 +57,15 @@ type InstrumentPnL struct {
 
 	UnrealizedPnL *float64
 
+	DayChange *float64
+
 	RealizedPnL float64
 
 	Dividends       float64
 	Coupons         float64
-	AccruedInterest float64 // НКД received on sells - НКД paid on buys
+	AccruedInterest float64
 }
 
-// TotalPnL is everything this instrument earned or lost: trades
-// (realized + unrealized) plus its income.
 func (i InstrumentPnL) TotalPnL() float64 {
 	total := i.RealizedPnL + i.Dividends + i.Coupons + i.AccruedInterest
 	if i.UnrealizedPnL != nil {
@@ -93,15 +82,14 @@ type Summary struct {
 	TotalDividends       float64
 	TotalCoupons         float64
 	TotalAccruedInterest float64
-	TotalTaxes           float64 // <= 0 normally (a refund is > 0)
-	TotalFees            float64 // fees not tied to a trade
+	TotalTaxes           float64
+	TotalFees            float64
 	TotalOther           float64
 	NetDeposits          float64
 	CashBalance          float64
+	TotalDayChange       float64
 }
 
-// TotalPnL: every gain and loss in the ledger. Deposits/withdrawals are
-// excluded - they are the investor's own money moving, not profit.
 func (s Summary) TotalPnL() float64 {
 	return s.TotalRealizedPnL + s.TotalUnrealizedPnL +
 		s.TotalDividends + s.TotalCoupons + s.TotalAccruedInterest +
@@ -110,8 +98,6 @@ func (s Summary) TotalPnL() float64 {
 
 func PriceKey(secid, board string) string { return secid + "/" + board }
 
-// event is one entry of an instrument's timeline: a trade or a
-// redemption (bond face value paid back).
 type event struct {
 	at         time.Time
 	trade      *Trade
@@ -174,7 +160,7 @@ func Compute(trades []Trade, cash []CashFlow, currentPrices map[string]float64) 
 				a := get(c.SecID, c.Board)
 				a.events = append(a.events, event{at: c.OccurredAt, redemption: c.Amount})
 			} else {
-				// Can't be matched against a cost basis: counted as-is.
+
 				summary.TotalOther += c.Amount
 			}
 		case CashTax:
@@ -232,9 +218,7 @@ func computeInstrument(secid, board string, events []event) InstrumentPnL {
 	var runningQty, runningCost float64
 	for _, e := range events {
 		if e.trade == nil {
-			// Redemption / amortization: face value paid back is a
-			// return of the money invested. It lowers the cost basis;
-			// anything above the remaining cost is profit.
+
 			runningCost -= e.redemption
 			if runningCost < 0 {
 				res.RealizedPnL += -runningCost
@@ -269,4 +253,19 @@ func computeInstrument(secid, board string, events []event) InstrumentPnL {
 		res.AvgCost = runningCost / runningQty
 	}
 	return res
+}
+
+func ApplyDayChange(summary *Summary, prevCloses map[string]float64) {
+	summary.TotalDayChange = 0
+	for i := range summary.Instruments {
+		in := &summary.Instruments[i]
+		in.DayChange = nil
+		prev, ok := prevCloses[PriceKey(in.SecID, in.Board)]
+		if !ok || in.CurrentPrice == nil || in.Quantity <= 0 {
+			continue
+		}
+		change := in.Quantity * (*in.CurrentPrice - prev)
+		in.DayChange = &change
+		summary.TotalDayChange += change
+	}
 }

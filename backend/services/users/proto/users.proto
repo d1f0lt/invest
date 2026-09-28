@@ -36,6 +36,20 @@ service UsersService {
   rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse);
 
   rpc Logout(LogoutRequest) returns (google.protobuf.Empty);
+
+  // UpdateMe changes the caller's email and/or username. Absent fields are
+  // left untouched; an empty username clears it. Requires "x-user-id".
+  rpc UpdateMe(UpdateMeRequest) returns (User);
+
+  // ChangePassword verifies current_password, stores new_password, revokes
+  // every refresh token of the account and issues a fresh token pair for
+  // the calling device. Requires "x-user-id".
+  rpc ChangePassword(ChangePasswordRequest) returns (LoginResponse);
+
+  // DeleteMe permanently removes the caller's account after verifying the
+  // password. Refresh tokens are dropped by ON DELETE CASCADE. Requires
+  // "x-user-id".
+  rpc DeleteMe(DeleteMeRequest) returns (google.protobuf.Empty);
 }
 
 message RegisterRequest {
@@ -75,4 +89,18 @@ message RefreshTokenRequest {
 
 message LogoutRequest {
   string refresh_token = 1;
+}
+
+message UpdateMeRequest {
+  optional string email = 1;
+  optional string username = 2;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message DeleteMeRequest {
+  string password = 1;
 }

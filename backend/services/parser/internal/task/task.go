@@ -9,13 +9,6 @@ type ReportUploaded struct {
 
 	PortfolioID string `json:"portfolio_id"`
 
-	
-	
-	
-	
-	
-	
-	
 	Broker string `json:"broker"`
 
 	Bucket    string `json:"bucket"`

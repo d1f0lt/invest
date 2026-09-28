@@ -98,10 +98,8 @@ type PriceRow struct {
 	TradingStatus  *string
 	MoexUpdateTime *string
 	CollectedAt    time.Time
+	PrevClose      *float64
 }
-
-
-
 
 func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64, error) {
 	if len(rows) == 0 {
@@ -121,12 +119,14 @@ func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64,
 	columns := []string{
 		"secid", "board", "last_price", "open_price", "high_price", "low_price",
 		"value_today", "volume_today", "trading_status", "moex_update_time", "collected_at",
+		"prev_close",
 	}
 	values := make([][]any, 0, len(rows))
 	for _, r := range rows {
 		values = append(values, []any{
 			r.SecID, r.Board, r.Last, r.Open, r.High, r.Low,
 			r.ValueToday, r.VolumeToday, r.TradingStatus, r.MoexUpdateTime, r.CollectedAt,
+			r.PrevClose,
 		})
 	}
 	if err := copyRows(ctx, tx, "tmp_latest_prices", columns, values); err != nil {
@@ -136,11 +136,13 @@ func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64,
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO latest_prices AS lp (
 			secid, board, last_price, open_price, high_price, low_price,
-			value_today, volume_today, trading_status, moex_update_time, collected_at
+			value_today, volume_today, trading_status, moex_update_time, collected_at,
+			prev_close
 		)
 		SELECT DISTINCT ON (secid, board)
 			secid, board, last_price, open_price, high_price, low_price,
-			value_today, volume_today, trading_status, moex_update_time, collected_at
+			value_today, volume_today, trading_status, moex_update_time, collected_at,
+			prev_close
 		FROM tmp_latest_prices
 		ORDER BY secid, board
 		ON CONFLICT (secid, board) DO UPDATE SET
@@ -152,7 +154,8 @@ func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64,
 			volume_today     = EXCLUDED.volume_today,
 			trading_status   = EXCLUDED.trading_status,
 			moex_update_time = EXCLUDED.moex_update_time,
-			collected_at     = EXCLUDED.collected_at
+			collected_at     = EXCLUDED.collected_at,
+			prev_close       = COALESCE(EXCLUDED.prev_close, lp.prev_close)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("upsert latest prices: %w", err)
@@ -162,6 +165,13 @@ func (s *Store) UpsertLatestPrices(ctx context.Context, rows []PriceRow) (int64,
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+func (s *Store) EnsureSchema(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE latest_prices ADD COLUMN IF NOT EXISTS prev_close NUMERIC`); err != nil {
+		return fmt.Errorf("ensure latest_prices.prev_close: %w", err)
+	}
+	return nil
 }
 
 const (
@@ -182,19 +192,11 @@ type Candle struct {
 	Value    *float64
 }
 
-
-
 type CandleMode int
 
 const (
-	
-	
-	
-	
 	CandleExtend CandleMode = iota
-	
-	
-	
+
 	CandleReplace
 )
 
@@ -257,8 +259,6 @@ func (s *Store) UpsertCandles(ctx context.Context, candles []Candle, mode Candle
 	return n, nil
 }
 
-
-
 func (s *Store) HistorySyncedThrough(ctx context.Context, board string) (time.Time, bool, error) {
 	var d time.Time
 	err := s.db.QueryRowContext(ctx, `SELECT synced_through FROM candle_history_sync WHERE board = $1`, board).Scan(&d)
@@ -282,10 +282,6 @@ func (s *Store) SetHistorySyncedThrough(ctx context.Context, board string, date 
 	}
 	return nil
 }
-
-
-
-
 
 func (s *Store) PruneHourlyCandles(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -13,28 +14,22 @@ import (
 var (
 	ErrNotFound          = errors.New("not found")
 	ErrUnknownInstrument = errors.New("unknown instrument: no such secid/board in securities")
-	// ErrDuplicate: a trade/cash operation with the same external_id is
-	// already stored in this portfolio.
+
 	ErrDuplicate = errors.New("duplicate external_id")
 )
 
 const (
 	postgresForeignKeyViolation = "23503"
 	postgresUniqueViolation     = "23505"
-	// invalid_text_representation: e.g. a portfolio id that isn't a UUID.
+
 	postgresInvalidTextRepresentation = "22P02"
 )
 
-// isInvalidText reports whether err is Postgres rejecting a malformed
-// value (a non-UUID id) - such an id can't match any row.
 func isInvalidText(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == postgresInvalidTextRepresentation
 }
 
-// mapInsertErr turns constraint violations into the package's sentinel
-// errors. For a foreign-key violation the offending instrument is named,
-// so a failed report import says which security price_updater lacks.
 func mapInsertErr(err error, t Trade) error {
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) {
@@ -54,6 +49,32 @@ type Portfolio struct {
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	MemberIDs []string
+}
+
+func (p Portfolio) Composite() bool { return len(p.MemberIDs) > 0 }
+
+func (p Portfolio) SourceIDs() []string {
+	if p.Composite() {
+		return p.MemberIDs
+	}
+	return []string{p.ID}
+}
+
+const portfolioColumns = `p.id, p.user_id, p.name, p.created_at, p.updated_at,
+	ARRAY(SELECT m.member_id::text FROM portfolio_members m WHERE m.portfolio_id = p.id ORDER BY m.position)`
+
+func scanPortfolio(row rowScanner) (Portfolio, error) {
+	var p Portfolio
+	var members pq.StringArray
+	if err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt, &members); err != nil {
+		return Portfolio{}, err
+	}
+	if len(members) > 0 {
+		p.MemberIDs = []string(members)
+	}
+	return p, nil
 }
 
 type Trade struct {
@@ -70,8 +91,11 @@ type Trade struct {
 	CreatedAt   time.Time
 
 	AccruedInterest float64
-	// ExternalID is "" for trades entered by hand (stored as NULL).
+
 	ExternalID string
+
+	SecurityName string
+	ISIN         string
 }
 
 type CashOperation struct {
@@ -81,15 +105,13 @@ type CashOperation struct {
 	Amount      float64
 	Currency    string
 	OccurredAt  time.Time
-	SecID       string // "" = none (NULL)
+	SecID       string
 	Board       string
 	Description string
 	ExternalID  string
 	CreatedAt   time.Time
 }
 
-// ImportResult counts what ImportReport created vs. skipped as already
-// imported.
 type ImportResult struct {
 	TradesCreated, TradesSkipped int
 	CashCreated, CashSkipped     int
@@ -122,26 +144,40 @@ func (s *Store) Close() { s.db.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
-func (s *Store) CreatePortfolio(ctx context.Context, userID, name string) (Portfolio, error) {
-	const stmt = `
-		INSERT INTO portfolios (user_id, name)
-		VALUES ($1, $2)
-		RETURNING id, user_id, name, created_at, updated_at
-	`
-	var p Portfolio
-	err := s.db.QueryRowContext(ctx, stmt, userID, name).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+func (s *Store) CreatePortfolio(ctx context.Context, userID, name string, memberIDs []string) (Portfolio, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	var id string
+	err = tx.QueryRowContext(ctx, `INSERT INTO portfolios (user_id, name) VALUES ($1, $2) RETURNING id`, userID, name).Scan(&id)
 	if err != nil {
 		return Portfolio{}, fmt.Errorf("insert portfolio: %w", err)
+	}
+	for i, m := range memberIDs {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO portfolio_members (portfolio_id, member_id, position) VALUES ($1, $2, $3)`, id, m, i)
+		if err != nil {
+			return Portfolio{}, fmt.Errorf("insert portfolio member: %w", err)
+		}
+	}
+
+	p, err := scanPortfolio(tx.QueryRowContext(ctx, `SELECT `+portfolioColumns+` FROM portfolios p WHERE p.id = $1`, id))
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("select portfolio: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Portfolio{}, fmt.Errorf("commit: %w", err)
 	}
 	return p, nil
 }
 
 func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Portfolio, error) {
-	const stmt = `
-		SELECT id, user_id, name, created_at, updated_at
-		FROM portfolios WHERE user_id = $1
-		ORDER BY created_at DESC
-	`
+	stmt := `SELECT ` + portfolioColumns + `
+		FROM portfolios p WHERE p.user_id = $1
+		ORDER BY p.created_at DESC`
 	rows, err := s.db.QueryContext(ctx, stmt, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select portfolios: %w", err)
@@ -150,8 +186,8 @@ func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Port
 
 	var out []Portfolio
 	for rows.Next() {
-		var p Portfolio
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		p, err := scanPortfolio(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan portfolio: %w", err)
 		}
 		out = append(out, p)
@@ -160,19 +196,28 @@ func (s *Store) ListPortfoliosByUser(ctx context.Context, userID string) ([]Port
 }
 
 func (s *Store) GetPortfolio(ctx context.Context, id string) (Portfolio, error) {
-	const stmt = `
-		SELECT id, user_id, name, created_at, updated_at
-		FROM portfolios WHERE id = $1
-	`
-	var p Portfolio
-	err := s.db.QueryRowContext(ctx, stmt, id).Scan(&p.ID, &p.UserID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
-	// A malformed (non-UUID) id can't exist either: NotFound, not a
-	// 500-style internal error.
+	stmt := `SELECT ` + portfolioColumns + ` FROM portfolios p WHERE p.id = $1`
+	p, err := scanPortfolio(s.db.QueryRowContext(ctx, stmt, id))
+
 	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
 		return Portfolio{}, ErrNotFound
 	}
 	if err != nil {
 		return Portfolio{}, fmt.Errorf("select portfolio: %w", err)
+	}
+	return p, nil
+}
+
+func (s *Store) RenamePortfolio(ctx context.Context, id, name string) (Portfolio, error) {
+	stmt := `UPDATE portfolios p SET name = $2, updated_at = now()
+		WHERE p.id = $1
+		RETURNING ` + portfolioColumns
+	p, err := scanPortfolio(s.db.QueryRowContext(ctx, stmt, id, name))
+	if errors.Is(err, sql.ErrNoRows) || isInvalidText(err) {
+		return Portfolio{}, ErrNotFound
+	}
+	if err != nil {
+		return Portfolio{}, fmt.Errorf("update portfolio: %w", err)
 	}
 	return p, nil
 }
@@ -198,12 +243,6 @@ func (s *Store) CreateTrade(ctx context.Context, t Trade) (Trade, error) {
 	return out, nil
 }
 
-// CreateTradesBatch inserts all trades in a single transaction: either
-// every trade is created or none is. Inserted in the given order, so the
-// returned slice matches the input 1:1 (needed by the CreateTrades RPC,
-// which promises response order == request order). A foreign-key
-// violation on any trade rolls the whole batch back and surfaces as
-// ErrUnknownInstrument, same as a single failed CreateTrade.
 func (s *Store) CreateTradesBatch(ctx context.Context, trades []Trade) ([]Trade, error) {
 	if len(trades) == 0 {
 		return nil, nil
@@ -249,13 +288,13 @@ func (s *Store) CreateTradesBatch(ctx context.Context, trades []Trade) ([]Trade,
 	return out, nil
 }
 
-func (s *Store) ListTrades(ctx context.Context, portfolioID string) ([]Trade, error) {
+func (s *Store) ListTrades(ctx context.Context, portfolioIDs []string) ([]Trade, error) {
 	const stmt = `
 		SELECT id, portfolio_id, secid, board, side, quantity, price, fee, currency, executed_at, created_at, accrued_interest, COALESCE(external_id, '')
-		FROM trades WHERE portfolio_id = $1
+		FROM trades WHERE portfolio_id = ANY($1::uuid[])
 		ORDER BY executed_at ASC, created_at ASC
 	`
-	rows, err := s.db.QueryContext(ctx, stmt, portfolioID)
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(portfolioIDs))
 	if err != nil {
 		return nil, fmt.Errorf("select trades: %w", err)
 	}
@@ -288,10 +327,6 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 		secids[i], boards[i] = inst[0], inst[1]
 	}
 
-	// MOEX quotes bonds in % of face value; trades store money per bond
-	// (see trades.price), so bond quotes are converted with the face
-	// value price_updater stores alongside (securities.price_in_percent,
-	// securities.face_value - price_updater migration 0002).
 	const stmt = `
 		SELECT lp.secid, lp.board,
 		       CASE WHEN s.price_in_percent AND s.face_value IS NOT NULL
@@ -322,14 +357,91 @@ func (s *Store) LatestPrices(ctx context.Context, instruments [][2]string) (map[
 	return out, rows.Err()
 }
 
-// ImportReport inserts a broker report's trades and cash operations in
-// one transaction. Rows whose external_id already exists in the
-// portfolio are skipped (ON CONFLICT DO NOTHING), which makes importing
-// the same report twice, or two overlapping reports, a no-op for the
-// repeated rows. Any other failure - notably a trade on an instrument
-// price_updater doesn't know (ErrUnknownInstrument) - rolls back the
-// whole import.
-func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []Trade, cash []CashOperation) (ImportResult, error) {
+const OpeningMarker = ":opening:"
+
+type OpeningScope struct {
+	AccountKey  string
+	PeriodStart time.Time
+}
+
+func applyOpening(ctx context.Context, tx *sql.Tx, portfolioID string, scope OpeningScope,
+	trades []Trade, cash []CashOperation, res *ImportResult) ([]Trade, []CashOperation, error) {
+	accountPrefix := scope.AccountKey + ":"
+	openingPrefix := scope.AccountKey + OpeningMarker
+
+	const delTrades = `
+		DELETE FROM trades
+		WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND executed_at > $3`
+	if _, err := tx.ExecContext(ctx, delTrades, portfolioID, openingPrefix, scope.PeriodStart); err != nil {
+		return nil, nil, fmt.Errorf("delete superseded opening trades: %w", err)
+	}
+	const delCash = `
+		DELETE FROM cash_operations
+		WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND occurred_at > $3`
+	if _, err := tx.ExecContext(ctx, delCash, portfolioID, openingPrefix, scope.PeriodStart); err != nil {
+		return nil, nil, fmt.Errorf("delete superseded opening cash operations: %w", err)
+	}
+
+	const earlier = `
+		SELECT EXISTS (
+			SELECT 1 FROM trades
+			WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND executed_at < $3
+		) OR EXISTS (
+			SELECT 1 FROM cash_operations
+			WHERE portfolio_id = $1 AND left(external_id, length($2)) = $2 AND occurred_at < $3
+		)`
+	var hasEarlier bool
+	if err := tx.QueryRowContext(ctx, earlier, portfolioID, accountPrefix, scope.PeriodStart).Scan(&hasEarlier); err != nil {
+		return nil, nil, fmt.Errorf("check earlier history: %w", err)
+	}
+	if !hasEarlier {
+		return trades, cash, nil
+	}
+
+	keptTrades := trades[:0:0]
+	for _, t := range trades {
+		if strings.HasPrefix(t.ExternalID, openingPrefix) {
+			res.TradesSkipped++
+			continue
+		}
+		keptTrades = append(keptTrades, t)
+	}
+	keptCash := cash[:0:0]
+	for _, c := range cash {
+		if strings.HasPrefix(c.ExternalID, openingPrefix) {
+			res.CashSkipped++
+			continue
+		}
+		keptCash = append(keptCash, c)
+	}
+	return keptTrades, keptCash, nil
+}
+
+func ensureSecurities(ctx context.Context, tx *sql.Tx, trades []Trade) error {
+	const stmt = `
+		INSERT INTO securities (secid, board, short_name, sec_name, isin, currency, price_in_percent)
+		VALUES ($1, $2, NULLIF($3, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6)
+		ON CONFLICT (secid, board) DO NOTHING`
+	seen := map[string]bool{}
+	for _, t := range trades {
+		key := t.SecID + "/" + t.Board
+		if t.SecurityName == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		currency := t.Currency
+		if currency == "RUB" {
+			currency = "SUR"
+		}
+		bond := t.Board == "TQOB" || t.Board == "TQCB"
+		if _, err := tx.ExecContext(ctx, stmt, t.SecID, t.Board, t.SecurityName, t.ISIN, currency, bond); err != nil {
+			return fmt.Errorf("ensure security %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ImportReport(ctx context.Context, portfolioID, importID string, trades []Trade, cash []CashOperation, opening *OpeningScope) (ImportResult, error) {
 	var res ImportResult
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -341,6 +453,17 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []T
 			_ = tx.Rollback()
 		}
 	}()
+
+	if err := ensureSecurities(ctx, tx, trades); err != nil {
+		return ImportResult{}, err
+	}
+
+	if opening != nil {
+		trades, cash, err = applyOpening(ctx, tx, portfolioID, *opening, trades, cash, &res)
+		if err != nil {
+			return ImportResult{}, err
+		}
+	}
 
 	const tradeStmt = `
 		INSERT INTO trades (portfolio_id, secid, board, side, quantity, price, fee, currency, executed_at, accrued_interest, external_id)
@@ -385,6 +508,21 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []T
 		}
 	}
 
+	if importID != "" {
+		const doneStmt = `
+			UPDATE report_imports
+			SET status = 'done', error = '',
+			    trades_created = $3, trades_skipped = $4,
+			    cash_operations_created = $5, cash_operations_skipped = $6,
+			    updated_at = now(), finished_at = now()
+			WHERE id = $1 AND portfolio_id = $2 AND status IN ('queued', 'processing')
+		`
+		if _, err := tx.ExecContext(ctx, doneStmt, importID, portfolioID,
+			res.TradesCreated, res.TradesSkipped, res.CashCreated, res.CashSkipped); err != nil && !isInvalidText(err) {
+			return ImportResult{}, fmt.Errorf("mark report import done: %w", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return ImportResult{}, fmt.Errorf("commit import: %w", err)
 	}
@@ -392,14 +530,14 @@ func (s *Store) ImportReport(ctx context.Context, portfolioID string, trades []T
 	return res, nil
 }
 
-func (s *Store) ListCashOperations(ctx context.Context, portfolioID string) ([]CashOperation, error) {
+func (s *Store) ListCashOperations(ctx context.Context, portfolioIDs []string) ([]CashOperation, error) {
 	const stmt = `
 		SELECT id, portfolio_id, type, amount, currency, occurred_at,
 		       COALESCE(secid, ''), COALESCE(board, ''), description, COALESCE(external_id, ''), created_at
-		FROM cash_operations WHERE portfolio_id = $1
+		FROM cash_operations WHERE portfolio_id = ANY($1::uuid[])
 		ORDER BY occurred_at ASC, created_at ASC
 	`
-	rows, err := s.db.QueryContext(ctx, stmt, portfolioID)
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(portfolioIDs))
 	if err != nil {
 		return nil, fmt.Errorf("select cash operations: %w", err)
 	}

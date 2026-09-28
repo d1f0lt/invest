@@ -10,12 +10,10 @@ import (
 	"time"
 )
 
-
-
 type DailyCandle struct {
 	SecID     string
 	BoardID   string
-	TradeDate time.Time 
+	TradeDate time.Time
 	Open      float64
 	High      float64
 	Low       float64
@@ -30,9 +28,6 @@ type historyResponse struct {
 }
 
 const historyPageSize = 100
-
-
-
 
 func (c *Client) FetchBoardHistory(ctx context.Context, board string, date time.Time) ([]DailyCandle, error) {
 	market := MarketFor(board)
@@ -106,7 +101,7 @@ type historyRow struct {
 	secID     string
 	boardID   string
 	tradeDate string
-	session   int 
+	session   int
 	open      *float64
 	high      *float64
 	low       *float64
@@ -130,8 +125,6 @@ func parseHistoryRow(r []interface{}, idx map[string]int) historyRow {
 	}
 }
 
-
-
 func sessionAt(r []interface{}, idx map[string]int) int {
 	switch v := cell(r, idx, "TRADINGSESSION").(type) {
 	case float64:
@@ -145,11 +138,6 @@ func sessionAt(r []interface{}, idx map[string]int) int {
 }
 
 const sessionTotal = 3
-
-
-
-
-
 
 func mergeSessions(rows []historyRow, board string) []DailyCandle {
 	bySec := map[string][]historyRow{}

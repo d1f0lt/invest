@@ -13,9 +13,13 @@ import "google/protobuf/empty.proto";
 // verification) - the service trusts it unconditionally, same model as
 // the old X-User-ID HTTP header (see internal/authmd).
 service PortfolioService {
+  // Creates an ordinary portfolio, or a composite one (see member_ids).
   rpc CreatePortfolio(CreatePortfolioRequest) returns (Portfolio);
   rpc ListPortfolios(google.protobuf.Empty) returns (ListPortfoliosResponse);
   rpc GetPortfolio(GetPortfolioRequest) returns (Portfolio);
+  // Renames a portfolio (the only editable field for now). Added
+  // 2026-09-25 for the mobile app's "Редактирование портфеля" screen.
+  rpc UpdatePortfolio(UpdatePortfolioRequest) returns (Portfolio);
   rpc CreateTrade(CreateTradeRequest) returns (Trade);
   // Batch counterpart of CreateTrade: inserts all trades in one DB
   // transaction - all-or-nothing. Used by the parser service, which
@@ -34,10 +38,45 @@ service PortfolioService {
   rpc ListCashOperations(ListCashOperationsRequest) returns (ListCashOperationsResponse);
   rpc GetHoldings(GetHoldingsRequest) returns (GetHoldingsResponse);
   rpc GetPnL(GetPnLRequest) returns (PnLSummary);
+  // Portfolio value (securities at daily closes + cash) for each day of a
+  // period - the chart on the app's home screen. Added 2026-09-26.
+  rpc GetValueHistory(GetValueHistoryRequest) returns (ValueHistory);
+
+  // Brokers whose reports can be imported (the "brokers" table). Shown in
+  // the app's "Выберите брокера" list; CreateReportImport accepts only
+  // these. Doesn't depend on the caller, but still needs x-user-id like
+  // every RPC here.
+  rpc ListBrokers(google.protobuf.Empty) returns (ListBrokersResponse);
+
+  // Report imports track one uploaded broker report through the parser:
+  // queued (gateway stored the file) -> processing (parser picked it up)
+  // -> done | failed. The app polls GetReportImport while it waits.
+  //
+  // CreateReportImport is called by gateway before it stores the file:
+  // it checks the portfolio belongs to the caller (NotFound), the broker
+  // is known and enabled and the file extension is one it accepts
+  // (InvalidArgument).
+  rpc CreateReportImport(CreateReportImportRequest) returns (ReportImport);
+  rpc GetReportImport(GetReportImportRequest) returns (ReportImport);
+  rpc ListReportImports(ListReportImportsRequest) returns (ListReportImportsResponse);
+  // Moves an import to processing / failed / done (done with nothing
+  // imported - an empty report). Used by the parser, and by gateway when
+  // storing or queueing the file failed. A finished import (done/failed)
+  // is never changed again: FailedPrecondition.
+  rpc UpdateReportImportStatus(UpdateReportImportStatusRequest) returns (ReportImport);
 }
 
 message CreatePortfolioRequest {
-  string name = 1; // empty -> server defaults to "Основной"
+  // empty -> server defaults to "Основной" ("Составной" with member_ids)
+  string name = 1;
+  // Composite portfolio (added 2026-09-26): ids of at least 2 distinct
+  // ordinary portfolios of the caller. A composite portfolio has no trades
+  // of its own - holdings, P&L, value history, trades, cash operations and
+  // report imports are those of its members together. It is read-only:
+  // CreateTrade(s), ImportReport and CreateReportImport on it fail with
+  // FailedPrecondition. Unknown / someone else's member - NotFound; fewer
+  // than 2 members or a composite member - InvalidArgument.
+  repeated string member_ids = 2;
 }
 
 message Portfolio {
@@ -45,6 +84,9 @@ message Portfolio {
   string name = 2;
   google.protobuf.Timestamp created_at = 3;
   google.protobuf.Timestamp updated_at = 4;
+  // Non-empty - a composite portfolio built from these portfolios, in the
+  // order they were given on creation.
+  repeated string member_ids = 5;
 }
 
 message ListPortfoliosResponse {
@@ -53,6 +95,11 @@ message ListPortfoliosResponse {
 
 message GetPortfolioRequest {
   string id = 1;
+}
+
+message UpdatePortfolioRequest {
+  string id = 1;
+  string name = 2; // required, trimmed, at most 100 characters
 }
 
 message CreateTradeRequest {
@@ -106,6 +153,13 @@ message TradeInput {
   // Stable id of the trade in the broker's records (e.g. deal number).
   // Unique per portfolio when set; empty = no deduplication.
   string external_id = 10;
+  // Report import only: the instrument's name and ISIN from the broker
+  // report. If (secid, board) isn't in the securities directory yet (fund
+  // not traded on the board price_updater loads, delisted...), a row is
+  // added with these so the import doesn't fail; it just has no price
+  // until price_updater (if ever) fills it in.
+  string security_name = 11;
+  string isin = 12;
 }
 
 // Cash operation types: "deposit", "withdrawal", "dividend", "coupon",
@@ -138,6 +192,19 @@ message ImportReportRequest {
   string portfolio_id = 1;
   repeated TradeInput trades = 2;
   repeated CashOperationInput cash_operations = 3;
+  // Optional: the import this report belongs to. When set, it is marked
+  // done (with the counts below) in the same transaction as the rows.
+  string report_import_id = 4;
+  // Broker account the report is for: the common prefix of its rows'
+  // external_ids, e.g. "sber:S24RH4S". Optional; needed for opening balances.
+  string account_key = 5;
+  // Start of the report period. Rows whose external_id starts with
+  // "<account_key>:opening:" are the opening balance - securities and cash
+  // held at period_start that were bought/deposited before the report.
+  // They are imported only if the portfolio has no earlier rows of this
+  // account; opening rows of this account dated after period_start are
+  // deleted (this report brings the real history for that time).
+  google.protobuf.Timestamp period_start = 6;
 }
 
 message ImportReportResponse {
@@ -175,6 +242,9 @@ message Holding {
   optional double current_price = 5;
   optional double market_value = 6;
   optional double unrealized_pnl = 7;
+  // Change of market_value since the previous trading day's close:
+  // quantity * (current_price - prev_close). Unset without both prices.
+  optional double day_change = 8;
 }
 
 message GetHoldingsResponse {
@@ -217,4 +287,88 @@ message PnLSummary {
   // Money on the account implied by the ledger: net deposits + every
   // cash flow of trades and cash operations.
   double cash_balance = 12;
+  // Sum of the holdings' day_change.
+  double total_day_change = 13;
+}
+
+message GetValueHistoryRequest {
+  string portfolio_id = 1;
+  // "week" | "month" | "year" | "all"; empty -> "all". Anything else is
+  // InvalidArgument. The period never starts before the first trade or
+  // cash operation.
+  string range = 2;
+}
+
+message ValuePoint {
+  // 00:00 Europe/Moscow of the day. The value is at the end of that day
+  // (the last point - right now, at current prices).
+  google.protobuf.Timestamp date = 1;
+  // Securities at the day's close (the last known close before it; bonds
+  // converted from % of face value) + cash on the account.
+  double value = 2;
+  // Deposits minus withdrawals up to the end of the day - value minus this
+  // is the profit at that point.
+  double net_deposits = 3;
+}
+
+message ValueHistory {
+  // Oldest first. One point per calendar day; periods longer than ~400
+  // days are thinned to one point per week (the last point is always kept).
+  repeated ValuePoint points = 1;
+}
+
+message Broker {
+  string id = 1;   // "sber" - the parser's broker key, sent back on upload
+  string name = 2; // "СберИнвестиции"
+  // Accepted file extensions, lower case, without the dot: ["html"].
+  repeated string file_formats = 3;
+  // Icon: absolute URL or a path on gateway ("/static/brokers/sber.png").
+  // Empty - the app draws a letter on the brand color.
+  string icon_url = 4;
+  string color = 5; // brand color "#RRGGBB", may be empty
+}
+
+message ListBrokersResponse {
+  repeated Broker brokers = 1;
+}
+
+message ReportImport {
+  string id = 1; // = task_id of the report.uploaded message
+  string portfolio_id = 2;
+  string broker_id = 3;
+  string filename = 4;
+  string status = 5; // "queued" | "processing" | "done" | "failed"
+  string error = 6;  // failed: message for the user (Russian)
+  int32 trades_created = 7;
+  int32 trades_skipped = 8;
+  int32 cash_operations_created = 9;
+  int32 cash_operations_skipped = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  optional google.protobuf.Timestamp finished_at = 13;
+}
+
+message CreateReportImportRequest {
+  string id = 1; // generated by the caller (gateway's task_id), UUID
+  string portfolio_id = 2;
+  string broker_id = 3;
+  string filename = 4;
+}
+
+message GetReportImportRequest {
+  string id = 1;
+}
+
+message ListReportImportsRequest {
+  string portfolio_id = 1;
+}
+
+message ListReportImportsResponse {
+  repeated ReportImport imports = 1; // newest first
+}
+
+message UpdateReportImportStatusRequest {
+  string id = 1;
+  string status = 2; // "processing" | "failed" | "done"
+  string error = 3;  // for "failed"
 }

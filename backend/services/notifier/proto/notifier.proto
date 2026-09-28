@@ -1,0 +1,116 @@
+// Contract for the notifier service: price alerts delivered to Telegram.
+syntax = "proto3";
+
+package invest.notifier.v1;
+
+option go_package = "invest/backend/services/notifier/proto;notifierpb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Every RPC requires "x-user-id" metadata (set by gateway after JWT
+// verification).
+service NotifierService {
+  // CreateAlert stores a target price for one security. The base price is
+  // the current quote at creation time; the direction (up/down) follows
+  // from target vs base. An alert fires once: the notification is sent,
+  // the alert becomes TRIGGERED and stays in the list until updated or
+  // deleted.
+  rpc CreateAlert(CreateAlertRequest) returns (Alert);
+  rpc ListAlerts(google.protobuf.Empty) returns (ListAlertsResponse);
+  // UpdateAlert sets a new target (price or percent) and, optionally, a
+  // new security, and makes the alert active again - typically after it
+  // has triggered. Like CreateAlert, the base price becomes the current
+  // quote.
+  rpc UpdateAlert(UpdateAlertRequest) returns (Alert);
+  rpc DeleteAlert(DeleteAlertRequest) returns (google.protobuf.Empty);
+
+  // CreateTelegramLink issues a one-time t.me deep link; opening it and
+  // pressing Start in the bot binds that chat to the caller.
+  rpc CreateTelegramLink(google.protobuf.Empty) returns (TelegramLinkToken);
+  rpc GetTelegramLink(google.protobuf.Empty) returns (TelegramLink);
+  rpc DeleteTelegramLink(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message CreateAlertRequest {
+  string secid = 1;
+  // Optional when the security trades on a single board.
+  string board = 2;
+  oneof target {
+    // Absolute target, in the same units as the quote (for bonds - % of
+    // face value, as MOEX and price_reader show it).
+    double target_price = 3;
+    // Relative to the current price: 5 = +5%, -3.5 = -3.5%.
+    double change_percent = 4;
+  }
+}
+
+message UpdateAlertRequest {
+  string id = 1;
+  oneof target {
+    double target_price = 2;
+    double change_percent = 3;
+  }
+  // Optional: move the alert to another security. Empty keeps the current
+  // one; board works as in CreateAlertRequest.
+  string secid = 4;
+  string board = 5;
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_ABOVE = 1; // fires when price >= target
+  DIRECTION_BELOW = 2; // fires when price <= target
+}
+
+enum AlertStatus {
+  ALERT_STATUS_UNSPECIFIED = 0;
+  ALERT_STATUS_ACTIVE = 1;    // being checked
+  ALERT_STATUS_TRIGGERED = 2; // notification sent; checked again only after UpdateAlert
+}
+
+message Alert {
+  string id = 1;
+  string secid = 2;
+  string board = 3;
+  string short_name = 4;
+  Direction direction = 5;
+  double base_price = 6;
+  double target_price = 7;
+  // (target - base) / base * 100.
+  double change_percent = 8;
+  optional double current_price = 9;
+  bool price_in_percent = 10;
+  string currency = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+  AlertStatus status = 14;
+  optional google.protobuf.Timestamp triggered_at = 15;
+  // Quote that triggered the notification.
+  optional double triggered_price = 16;
+  // The percent the user entered (change_percent of the last Create/Update);
+  // absent when the target was given as a price. Lets the app show and
+  // edit the alert the way it was set up.
+  optional double input_percent = 17;
+}
+
+message ListAlertsResponse {
+  repeated Alert alerts = 1;
+}
+
+message DeleteAlertRequest {
+  string id = 1;
+}
+
+message TelegramLinkToken {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message TelegramLink {
+  bool linked = 1;
+  string username = 2;
+  optional google.protobuf.Timestamp linked_at = 3;
+  // false when TELEGRAM_BOT_TOKEN is not configured on the server.
+  bool bot_enabled = 4;
+}

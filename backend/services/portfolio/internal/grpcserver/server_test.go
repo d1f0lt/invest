@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,13 @@ type fakeStore struct {
 	trades     map[string][]storage.Trade
 	cash       map[string][]storage.CashOperation
 	prices     map[string]float64
+	prevCloses map[string]float64
+	closes     map[string][]storage.DailyClose
+	closesFrom time.Time
 	nextID     int
+
+	brokers map[string]storage.Broker
+	imports map[string]storage.ReportImport
 }
 
 func newFakeStore() *fakeStore {
@@ -32,6 +39,11 @@ func newFakeStore() *fakeStore {
 		trades:     map[string][]storage.Trade{},
 		cash:       map[string][]storage.CashOperation{},
 		prices:     map[string]float64{},
+		brokers: map[string]storage.Broker{
+			"sber": {ID: "sber", Name: "СберИнвестиции", FileFormats: []string{"html"}, Enabled: true},
+			"old":  {ID: "old", Name: "Old", FileFormats: []string{"html"}, Enabled: false},
+		},
+		imports: map[string]storage.ReportImport{},
 	}
 }
 
@@ -40,8 +52,8 @@ func (f *fakeStore) genID(prefix string) string {
 	return prefix + "-" + time.Now().Format("150405") + "-" + string(rune('a'+f.nextID))
 }
 
-func (f *fakeStore) CreatePortfolio(_ context.Context, userID, name string) (storage.Portfolio, error) {
-	p := storage.Portfolio{ID: f.genID("p"), UserID: userID, Name: name, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+func (f *fakeStore) CreatePortfolio(_ context.Context, userID, name string, memberIDs []string) (storage.Portfolio, error) {
+	p := storage.Portfolio{ID: f.genID("p"), UserID: userID, Name: name, CreatedAt: time.Now(), UpdatedAt: time.Now(), MemberIDs: memberIDs}
 	f.portfolios[p.ID] = p
 	return p, nil
 }
@@ -63,6 +75,17 @@ func (f *fakeStore) GetPortfolio(_ context.Context, id string) (storage.Portfoli
 	return storage.Portfolio{}, storage.ErrNotFound
 }
 
+func (f *fakeStore) RenamePortfolio(_ context.Context, id, name string) (storage.Portfolio, error) {
+	p, ok := f.portfolios[id]
+	if !ok {
+		return storage.Portfolio{}, storage.ErrNotFound
+	}
+	p.Name = name
+	p.UpdatedAt = time.Now()
+	f.portfolios[id] = p
+	return p, nil
+}
+
 func (f *fakeStore) CreateTrade(_ context.Context, t storage.Trade) (storage.Trade, error) {
 	if t.SecID == "UNKNOWN" {
 		return storage.Trade{}, storage.ErrUnknownInstrument
@@ -73,8 +96,7 @@ func (f *fakeStore) CreateTrade(_ context.Context, t storage.Trade) (storage.Tra
 }
 
 func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade) ([]storage.Trade, error) {
-	// Mirror the real store's all-or-nothing semantics: validate every
-	// trade first, apply nothing if any fails.
+
 	created := make([]storage.Trade, 0, len(trades))
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {
@@ -90,13 +112,15 @@ func (f *fakeStore) CreateTradesBatch(_ context.Context, trades []storage.Trade)
 	return created, nil
 }
 
-func (f *fakeStore) ListTrades(_ context.Context, portfolioID string) ([]storage.Trade, error) {
-	return f.trades[portfolioID], nil
+func (f *fakeStore) ListTrades(_ context.Context, portfolioIDs []string) ([]storage.Trade, error) {
+	var out []storage.Trade
+	for _, id := range portfolioIDs {
+		out = append(out, f.trades[id]...)
+	}
+	return out, nil
 }
 
-// ImportReport mirrors the real store: all-or-nothing, rows whose
-// external_id already exists in the portfolio are skipped.
-func (f *fakeStore) ImportReport(_ context.Context, portfolioID string, trades []storage.Trade, cash []storage.CashOperation) (storage.ImportResult, error) {
+func (f *fakeStore) ImportReport(_ context.Context, portfolioID, importID string, trades []storage.Trade, cash []storage.CashOperation, _ *storage.OpeningScope) (storage.ImportResult, error) {
 	var res storage.ImportResult
 	for _, t := range trades {
 		if t.SecID == "UNKNOWN" {
@@ -130,11 +154,47 @@ func (f *fakeStore) ImportReport(_ context.Context, portfolioID string, trades [
 		known["c"+c.ExternalID] = c.ExternalID != ""
 		res.CashCreated++
 	}
+	if r, ok := f.imports[importID]; ok && r.PortfolioID == portfolioID &&
+		(r.Status == storage.ImportQueued || r.Status == storage.ImportProcessing) {
+		r.Status = storage.ImportDone
+		r.TradesCreated, r.TradesSkipped = res.TradesCreated, res.TradesSkipped
+		r.CashCreated, r.CashSkipped = res.CashCreated, res.CashSkipped
+		f.imports[importID] = r
+	}
 	return res, nil
 }
 
-func (f *fakeStore) ListCashOperations(_ context.Context, portfolioID string) ([]storage.CashOperation, error) {
-	return f.cash[portfolioID], nil
+func (f *fakeStore) ListCashOperations(_ context.Context, portfolioIDs []string) ([]storage.CashOperation, error) {
+	var out []storage.CashOperation
+	for _, id := range portfolioIDs {
+		out = append(out, f.cash[id]...)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) PrevCloses(_ context.Context, instruments [][2]string) (map[string]float64, error) {
+	out := map[string]float64{}
+	for _, inst := range instruments {
+		key := inst[0] + "/" + inst[1]
+		if p, ok := f.prevCloses[key]; ok {
+			out[key] = p
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) DailyCloses(_ context.Context, instruments [][2]string, from time.Time) (map[string][]storage.DailyClose, error) {
+	f.closesFrom = from
+	out := map[string][]storage.DailyClose{}
+	for _, inst := range instruments {
+		key := inst[0] + "/" + inst[1]
+		for _, c := range f.closes[key] {
+			if !c.Day.Before(from) {
+				out[key] = append(out[key], c)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) LatestPrices(_ context.Context, instruments [][2]string) (map[string]float64, error) {
@@ -214,6 +274,61 @@ func TestGetPortfolio_NonexistentIsNotFound(t *testing.T) {
 	_, err := s.GetPortfolio(withUserID("u1"), &portfoliopb.GetPortfolioRequest{Id: "nope"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+func TestUpdatePortfolio_Renames(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("u1"), &portfoliopb.CreatePortfolioRequest{Name: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: "  ИИС  "})
+	if err != nil {
+		t.Fatalf("UpdatePortfolio: %v", err)
+	}
+	if got.Name != "ИИС" || store.portfolios[p.Id].Name != "ИИС" {
+		t.Errorf("name = %q (stored %q), want trimmed \"ИИС\"", got.Name, store.portfolios[p.Id].Name)
+	}
+}
+
+func TestUpdatePortfolio_Validation(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("u1"), &portfoliopb.CreatePortfolioRequest{Name: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"", "   ", strings.Repeat("я", maxPortfolioNameLen+1)} {
+		_, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: name})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("name len %d: code = %v, want InvalidArgument", len(name), status.Code(err))
+		}
+	}
+	if _, err := s.UpdatePortfolio(withUserID("u1"), &portfoliopb.UpdatePortfolioRequest{
+		Id: p.Id, Name: strings.Repeat("я", maxPortfolioNameLen),
+	}); err != nil {
+		t.Errorf("name of exactly %d runes rejected: %v", maxPortfolioNameLen, err)
+	}
+}
+
+func TestUpdatePortfolio_NotYoursIsNotFound(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store)
+	p, err := s.CreatePortfolio(withUserID("owner"), &portfoliopb.CreatePortfolioRequest{Name: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.UpdatePortfolio(withUserID("someone-else"), &portfoliopb.UpdatePortfolioRequest{Id: p.Id, Name: "b"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("code = %v, want NotFound", status.Code(err))
+	}
+	if store.portfolios[p.Id].Name != "a" {
+		t.Errorf("foreign portfolio was renamed to %q", store.portfolios[p.Id].Name)
 	}
 }
 
@@ -473,7 +588,7 @@ func TestImportReport_IdempotentAndFeedsPnL(t *testing.T) {
 	if sum.GetTotalDividends() != 300 || sum.GetNetDeposits() != 6000 || sum.GetTotalAccruedInterest() != -82.26 {
 		t.Errorf("summary = %+v", sum)
 	}
-	// unrealized SBER 10*320-3001 = 199 (bond has no price) + dividend 300 - НКД 82.26
+
 	if d := sum.GetTotalPnl() - 416.74; d > 1e-6 || d < -1e-6 {
 		t.Errorf("total pnl = %v, want 416.74", sum.GetTotalPnl())
 	}

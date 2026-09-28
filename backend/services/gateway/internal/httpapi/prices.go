@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	pricereaderpb "invest/backend/services/gateway/internal/pricereaderpb"
+	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 )
 
 type priceView struct {
@@ -24,9 +24,10 @@ type priceView struct {
 	TradingStatus  *string   `json:"trading_status"`
 	MoexUpdateTime *string   `json:"moex_update_time"`
 	CollectedAt    time.Time `json:"collected_at"`
+	PrevClose      *float64  `json:"prev_close"`
 }
 
-func toPriceView(p *pricereaderpb.PriceView) priceView {
+func toPriceView(p *securitiesreaderpb.PriceView) priceView {
 	return priceView{
 		SecID: p.GetSecid(), Board: p.GetBoard(),
 		ShortName: p.ShortName, SecName: p.SecName, ISIN: p.Isin, Currency: p.Currency,
@@ -34,6 +35,7 @@ func toPriceView(p *pricereaderpb.PriceView) priceView {
 		ValueToday: p.ValueToday, VolumeToday: p.VolumeToday,
 		TradingStatus: p.TradingStatus, MoexUpdateTime: p.MoexUpdateTime,
 		CollectedAt: p.GetCollectedAt().AsTime(),
+		PrevClose:   p.PrevClose,
 	}
 }
 
@@ -46,7 +48,7 @@ func (h *Handlers) handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := h.callCtx(r)
 	defer cancel()
 
-	resp, err := h.Upstream.PriceReader.GetPrices(ctx, &pricereaderpb.GetPricesRequest{Tickers: tickers})
+	resp, err := h.Upstream.SecuritiesReader.GetPrices(ctx, &securitiesreaderpb.GetPricesRequest{Tickers: tickers})
 	if err != nil {
 		writeUpstreamError(w, h.Log, err)
 		return

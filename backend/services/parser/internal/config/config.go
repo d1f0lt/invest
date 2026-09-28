@@ -7,13 +7,6 @@ import (
 )
 
 type Config struct {
-	
-	
-	
-	
-	
-	
-	
 	GRPCAddr string
 
 	RabbitMQURL string
@@ -27,10 +20,6 @@ type Config struct {
 
 	MinIOUseSSL bool
 
-	
-	
-	
-	
 	PortfolioGRPCAddr string
 
 	LogLevel string

@@ -5,21 +5,24 @@ import (
 	"strings"
 	"time"
 
-	pricereaderpb "invest/backend/services/gateway/internal/pricereaderpb"
+	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
 )
 
-var candleRanges = map[string]pricereaderpb.CandleRange{
-	"day":   pricereaderpb.CandleRange_CANDLE_RANGE_DAY,
-	"week":  pricereaderpb.CandleRange_CANDLE_RANGE_WEEK,
-	"month": pricereaderpb.CandleRange_CANDLE_RANGE_MONTH,
-	"year":  pricereaderpb.CandleRange_CANDLE_RANGE_YEAR,
-	"all":   pricereaderpb.CandleRange_CANDLE_RANGE_ALL,
+var candleRanges = map[string]securitiesreaderpb.CandleRange{
+	"day":   securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY,
+	"week":  securitiesreaderpb.CandleRange_CANDLE_RANGE_WEEK,
+	"month": securitiesreaderpb.CandleRange_CANDLE_RANGE_MONTH,
+	"year":  securitiesreaderpb.CandleRange_CANDLE_RANGE_YEAR,
+	"all":   securitiesreaderpb.CandleRange_CANDLE_RANGE_ALL,
+	"5y":    securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS,
 }
 
-var candleIntervalNames = map[pricereaderpb.CandleInterval]string{
-	pricereaderpb.CandleInterval_CANDLE_INTERVAL_HOUR: "hour",
-	pricereaderpb.CandleInterval_CANDLE_INTERVAL_DAY:  "day",
-	pricereaderpb.CandleInterval_CANDLE_INTERVAL_WEEK: "week",
+var candleIntervalNames = map[securitiesreaderpb.CandleInterval]string{
+	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR: "hour",
+	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY:  "day",
+	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK: "week",
+
+	securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES: "10min",
 }
 
 type candleView struct {
@@ -48,14 +51,14 @@ func (h *Handlers) handleGetCandles(w http.ResponseWriter, r *http.Request) {
 	}
 	rng, ok := candleRanges[rangeName]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "range must be one of: day, week, month, year, all")
+		writeError(w, http.StatusBadRequest, "range must be one of: day, week, month, year, 5y, all")
 		return
 	}
 
 	ctx, cancel := h.callCtx(r)
 	defer cancel()
 
-	resp, err := h.Upstream.PriceReader.GetCandles(ctx, &pricereaderpb.GetCandlesRequest{
+	resp, err := h.Upstream.SecuritiesReader.GetCandles(ctx, &securitiesreaderpb.GetCandlesRequest{
 		Secid: r.PathValue("secid"),
 		Board: r.URL.Query().Get("board"),
 		Range: rng,
@@ -68,7 +71,7 @@ func (h *Handlers) handleGetCandles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toCandlesResponse(rangeName, resp))
 }
 
-func toCandlesResponse(rangeName string, resp *pricereaderpb.GetCandlesResponse) candlesResponse {
+func toCandlesResponse(rangeName string, resp *securitiesreaderpb.GetCandlesResponse) candlesResponse {
 	out := candlesResponse{
 		SecID:    resp.GetSecid(),
 		Board:    resp.GetBoard(),

@@ -1,12 +1,3 @@
-
-
-
-
-
-
-
-
-
 package portfolioclient
 
 import (
@@ -28,11 +19,6 @@ type Client struct {
 	api  portfoliopb.PortfolioServiceClient
 }
 
-
-
-
-
-
 func New(addr string) (*Client, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -43,27 +29,23 @@ func New(addr string) (*Client, error) {
 
 func (c *Client) Close() error { return c.conn.Close() }
 
-
-
 type ImportResult struct {
 	TradesCreated, TradesSkipped int
 	CashCreated, CashSkipped     int
 }
 
-
-
-
-
-
-
-
-func (c *Client) ImportReport(ctx context.Context, userID, portfolioID string, r parsing.Report) (ImportResult, error) {
+func (c *Client) ImportReport(ctx context.Context, userID, portfolioID, importID string, r parsing.Report) (ImportResult, error) {
 	ctx = authmd.WithUserID(ctx, userID)
 
 	req := &portfoliopb.ImportReportRequest{
 		PortfolioId:    portfolioID,
+		ReportImportId: importID,
+		AccountKey:     r.AccountKey,
 		Trades:         make([]*portfoliopb.TradeInput, 0, len(r.Trades)),
 		CashOperations: make([]*portfoliopb.CashOperationInput, 0, len(r.CashOperations)),
+	}
+	if r.PeriodStart != nil {
+		req.PeriodStart = timestamppb.New(*r.PeriodStart)
 	}
 	for _, t := range r.Trades {
 		in := &portfoliopb.TradeInput{
@@ -76,6 +58,8 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID string, r
 			Currency:        t.Currency,
 			AccruedInterest: t.AccruedInterest,
 			ExternalId:      t.ExternalID,
+			SecurityName:    t.SecurityName,
+			Isin:            t.ISIN,
 		}
 		if t.ExecutedAt != nil {
 			in.ExecutedAt = timestamppb.New(*t.ExecutedAt)
@@ -110,9 +94,20 @@ func (c *Client) ImportReport(ctx context.Context, userID, portfolioID string, r
 	}, nil
 }
 
-
-
-
 func submitTimeout(rows int) time.Duration {
 	return 30*time.Second + time.Duration(rows)*200*time.Millisecond
+}
+
+func (c *Client) SetImportStatus(ctx context.Context, userID, importID, status, message string) error {
+	ctx, cancel := context.WithTimeout(authmd.WithUserID(ctx, userID), 10*time.Second)
+	defer cancel()
+	_, err := c.api.UpdateReportImportStatus(ctx, &portfoliopb.UpdateReportImportStatusRequest{
+		Id:     importID,
+		Status: status,
+		Error:  message,
+	})
+	if err != nil {
+		return fmt.Errorf("set report import %s status %s: %w", importID, status, err)
+	}
+	return nil
 }

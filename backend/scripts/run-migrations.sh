@@ -9,11 +9,12 @@
 # used to do for price_updater) therefore never actually runs anything.
 #
 # The fix: mount each service's migrations/ folder under
-# /docker-entrypoint-initdb.d/migrations/<NN>_<service>/ instead, and mount
-# *this* script directly as a *.sh file in /docker-entrypoint-initdb.d. The
-# entrypoint sources *.sh files it finds there, so this one runs and, in
-# turn, applies every *.sql file it finds under migrations/, one service
-# subdirectory at a time, in alphabetical order.
+# /docker-entrypoint-initdb.d/migrations/<NN>_<service>/ instead; this
+# script is mounted at /opt/invest/run-migrations.sh and started on first
+# init by scripts/00-run-migrations.sql (see that file for why it isn't a
+# *.sh in /docker-entrypoint-initdb.d any more). It applies every *.sql
+# file it finds under migrations/, one service subdirectory at a time, in
+# alphabetical order.
 #
 # Ordering matters when one service's migration references another's
 # tables (e.g. portfolio's trades table has a foreign key into
@@ -29,14 +30,14 @@
 # init (empty data dir); to apply new migrations to an existing database,
 # run it by hand:
 #
-#   docker compose exec postgres sh /docker-entrypoint-initdb.d/00-run-migrations.sh
+#   docker compose exec postgres sh /opt/invest/run-migrations.sh
 #
 # (A database created before this tracking existed has an empty
 # schema_migrations table, so the first manual run re-applies every file
 # once - they are written to be idempotent - and records them.)
 #
-# Everything runs in a subshell: the postgres entrypoint *sources* this
-# file (it is not executable), so `set`/`exit` here must not leak into it.
+# Everything runs in a subshell so `set`/`exit` can't leak into a caller
+# that sources this file (older setups did; now it is always run by `sh`).
 (
     set -eu
 
