@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"invest/backend/services/portfolio/internal/pnl"
+	"invest/backend/services/portfolio/internal/storage"
 	portfoliopb "invest/backend/services/portfolio/proto"
 )
 
@@ -81,10 +83,24 @@ func (s *Server) GetValueHistory(ctx context.Context, req *portfoliopb.GetValueH
 
 	loc := s.location()
 	days := pnl.HistoryDays(from, now, loc, maxDailyPoints)
-	closes, err := s.Store.DailyCloses(ctx, b.instruments, days[0].Add(-closesLookback))
+	query := b.instruments
+	for _, olds := range b.aliases {
+		query = append(query[:len(query):len(query)], olds...)
+	}
+	closes, err := s.Store.DailyCloses(ctx, query, days[0].Add(-closesLookback))
 	if err != nil {
 		s.Log.Error("daily closes", "error", err)
 		return nil, status.Error(codes.Internal, "internal error")
+	}
+	for target, olds := range b.aliases {
+		var alias []storage.DailyClose
+		for _, old := range olds {
+			alias = append(alias, closes[pnl.PriceKey(old[0], old[1])]...)
+			delete(closes, pnl.PriceKey(old[0], old[1]))
+		}
+		sort.SliceStable(alias, func(i, j int) bool { return alias[i].Day.Before(alias[j].Day) })
+		key := pnl.PriceKey(target[0], target[1])
+		closes[key] = mergeAliasCloses(closes[key], alias)
 	}
 
 	byKey := make(map[string][]pnl.DailyClose, len(closes))

@@ -27,6 +27,7 @@ type fakeStore struct {
 	prevCloses map[string]float64
 	closes     map[string][]storage.DailyClose
 	closesFrom time.Time
+	boards     map[string][]storage.BoardPrice
 	nextID     int
 
 	brokers map[string]storage.Broker
@@ -192,6 +193,16 @@ func (f *fakeStore) DailyCloses(_ context.Context, instruments [][2]string, from
 			if !c.Day.Before(from) {
 				out[key] = append(out[key], c)
 			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) PriceBoards(_ context.Context, secids []string) (map[string][]storage.BoardPrice, error) {
+	out := map[string][]storage.BoardPrice{}
+	for _, id := range secids {
+		if b, ok := f.boards[id]; ok {
+			out[id] = b
 		}
 	}
 	return out, nil
