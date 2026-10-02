@@ -299,16 +299,15 @@ class _MetricRow extends StatelessWidget {
 
 /// `+30,44 ₽ ▲ 0,11%` / `−763,42 ₽ ▼ 2,56%`, цветом по знаку.
 class _Change extends StatelessWidget {
-  const _Change({required this.money, required this.percent, this.style});
+  const _Change({required this.money, required this.percent});
 
   final double money;
   final double percent;
-  final TextStyle? style;
 
   @override
   Widget build(BuildContext context) {
     final color = changeColor(context, money);
-    final base = (style ?? Theme.of(context).textTheme.bodyLarge)!
+    final base = Theme.of(context).textTheme.bodyLarge!
         .copyWith(color: color, fontWeight: FontWeight.w600);
     final icon = _arrow(money);
     return Text.rich(
@@ -706,10 +705,9 @@ class _StructureSection extends StatelessWidget {
 // --- Общее ---
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title, this.action});
+  const _SectionTitle({required this.title});
 
   final String title;
-  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -721,7 +719,6 @@ class _SectionTitle extends StatelessWidget {
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
         ),
-        if (action != null) action!,
       ],
     );
   }

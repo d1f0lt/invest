@@ -1,0 +1,164 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PROTOC_GEN_GO_VERSION: v1.36.5
+  PROTOC_GEN_GO_GRPC_VERSION: v1.5.1
+
+jobs:
+  test:
+    # размножится в отдельную жобу на каждый сервис + параллельно
+    name: ${{ matrix.service }} tests
+    runs-on: ubuntu-latest
+    strategy:
+      # не отменять параллельные джобы, если одна упала
+      fail-fast: false
+      matrix:
+        service:
+          - gateway
+          - notifier
+          - parser
+          - portfolio
+          - price_updater
+          - securities_reader
+          - users
+    defaults:
+      run:
+        working-directory: backend/services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # брать версию Go из go.mod
+          go-version-file: backend/services/${{ matrix.service }}/go.mod
+          cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
+
+      - name: Install protoc
+        if: hashFiles(format('backend/services/{0}/Makefile', matrix.service)) != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq protobuf-compiler libprotobuf-dev
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+
+      - name: Generate proto
+        # если в сервисе существует Makefile
+        # подстановка в строку имени сервиса из матрицы
+        if: hashFiles(format('backend/services/{0}/Makefile', matrix.service)) != ''
+        run: make clean proto
+
+      - name: gofmt
+        # gofmt -l - список неотформатированных файлов
+        # git ls-files - go файлы в в идексе (кроме *.pb.go)
+        # если не пустой.
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      # статический анализатор 
+      # ./... - папка и все подпапки
+      - name: go vet
+        run: go vet ./...
+
+      # проверка гонки
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      # проверка сборки
+      - name: go build
+        run: go build -o /dev/null ./cmd
+
+  postgres:
+    name: migrations + notifier storage tests
+    runs-on: ubuntu-latest
+    # контейнеры рядом с джобой
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: invest
+        ports:
+          - 5432:5432
+        # ждем, пока контейнер не будет готов к работе, иначе тесты запустились бы раньше
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: invest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migrations
+        working-directory: backend
+        run: |
+          root="$RUNNER_TEMP/migrations"
+          mkdir -p "$root"
+          ln -s "$PWD/services/price_updater/migrations" "$root/10_price_updater"
+          ln -s "$PWD/services/users/migrations" "$root/20_users"
+          ln -s "$PWD/services/portfolio/migrations" "$root/30_portfolio"
+          ln -s "$PWD/services/notifier/migrations" "$root/40_notifier"
+          MIGRATIONS_ROOT="$root" sh scripts/run-migrations.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/services/notifier/go.mod
+          cache-dependency-path: backend/services/notifier/go.sum
+
+      - name: notifier storage tests
+        working-directory: backend/services/notifier
+        env:
+          NOTIFIER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/invest?sslmode=disable
+        run: go test -race -count=1 ./internal/storage/...
+
+  docker:
+    name: docker build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - gateway
+          - notifier
+          - parser
+          - portfolio
+          - price_updater
+          - securities_reader
+          - users
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        working-directory: backend
+        run: |
+          sed 's/=$/=ci/' .env.example > .env
+          docker compose build ${{ matrix.service }}

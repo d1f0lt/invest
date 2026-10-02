@@ -139,8 +139,8 @@ class AlertsApi {
         final json = await _client.put(
           '/api/v1/alerts/${Uri.encodeComponent(id)}',
           {
-            if (secid != null) 'secid': secid,
-            if (board != null) 'board': board,
+            'secid': ?secid,
+            'board': ?board,
             ...target.toJson(),
           },
           auth: true,

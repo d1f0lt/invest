@@ -1,0 +1,82 @@
+name: mobile
+
+on:
+  push:
+    branches: [main]
+    # и будут изменения в этих файлах
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    # В любую ветку
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+
+# если придет другой пуш в ту же ветку с изменениями в этой же группе, текущий workflow отменится
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # права action-runner
+  contents: read
+
+jobs:
+  # id для ссылки в needs
+  analyze:
+    name: Flutter analyze
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      # клонирование
+      - uses: actions/checkout@v4
+
+      # установка Flutter
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter analyze
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    needs: analyze
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      # нужно для сборки Android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      
+      # настройка Gradle
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: flutter pub get
+
+      - run: flutter build apk --debug
+
+      # сохранение apk как артефакта 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
