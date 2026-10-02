@@ -49,6 +49,13 @@ func (c *profileClient) ChangePassword(_ context.Context, in *userspb.ChangePass
 	}, nil
 }
 
+func (c *profileClient) GetMe(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*userspb.User, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &userspb.User{Id: "u1", Email: "a@b.c", CreatedAt: timestamppb.Now()}, nil
+}
+
 func (c *profileClient) DeleteMe(_ context.Context, in *userspb.DeleteMeRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
 	c.deleted = in
 	if c.err != nil {
@@ -71,6 +78,7 @@ func doProfile(t *testing.T, client *profileClient, method, path, body string, h
 	return rec
 }
 
+func getMe(h *Handlers) http.HandlerFunc          { return h.handleMe }
 func updateMe(h *Handlers) http.HandlerFunc       { return h.handleUpdateMe }
 func changePassword(h *Handlers) http.HandlerFunc { return h.handleChangePassword }
 func deleteMe(h *Handlers) http.HandlerFunc       { return h.handleDeleteMe }
@@ -140,5 +148,16 @@ func TestHandleDeleteMe_WrongPasswordIs403(t *testing.T) {
 	client := &profileClient{err: status.Error(codes.PermissionDenied, "wrong password")}
 	if rec := doProfile(t, client, http.MethodDelete, "/api/v1/me", `{"password":"x"}`, deleteMe); rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestHandleMe_DeletedUserIs401(t *testing.T) {
+	client := &profileClient{err: status.Error(codes.NotFound, "user not found")}
+	if rec := doProfile(t, client, http.MethodGet, "/api/v1/me", "", getMe); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	client.err = nil
+	if rec := doProfile(t, client, http.MethodGet, "/api/v1/me", "", getMe); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }

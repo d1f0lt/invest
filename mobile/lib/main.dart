@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'alerts/alerts_store.dart';
+import 'api/auth_api.dart';
 import 'api/session.dart';
 import 'auth/login_screen.dart';
 import 'auth/widgets.dart';
@@ -23,6 +24,14 @@ Future<void> main() async {
         ?.pushAndRemoveUntil(fadeRoute(const LoginScreen()), (_) => false);
   };
   runApp(MainApp(loggedIn: Session.instance.isLoggedIn));
+  // Токен может пережить удаление аккаунта (например, после очистки базы):
+  // access-токен проверяется только по подписи. Спрашиваем /me — сервер
+  // ответит 401, обновить токен не получится, и onExpired вернёт на вход.
+  if (Session.instance.isLoggedIn) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AuthApi().me().ignore();
+    });
+  }
 }
 
 class MainApp extends StatelessWidget {

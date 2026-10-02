@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"invest/backend/services/gateway/internal/auth"
@@ -168,6 +170,10 @@ func (h *Handlers) handleMe(w http.ResponseWriter, r *http.Request) {
 	ctx = auth.WithUserID(ctx, userID)
 
 	user, err := h.Upstream.Users.GetMe(ctx, &emptypb.Empty{})
+	if status.Code(err) == codes.NotFound {
+		writeError(w, http.StatusUnauthorized, "user not found")
+		return
+	}
 	if err != nil {
 		writeUpstreamError(w, h.Log, err)
 		return
