@@ -32,6 +32,7 @@ type Store interface {
 	LatestPrices(ctx context.Context, instruments [][2]string) (map[string]float64, error)
 	PrevCloses(ctx context.Context, instruments [][2]string) (map[string]float64, error)
 	DailyCloses(ctx context.Context, instruments [][2]string, from time.Time) (map[string][]storage.DailyClose, error)
+	PriceBoards(ctx context.Context, secids []string) (map[string][]storage.BoardPrice, error)
 
 	ListBrokers(ctx context.Context) ([]storage.Broker, error)
 	GetBroker(ctx context.Context, id string) (storage.Broker, error)
@@ -364,6 +365,7 @@ type book struct {
 	ledgers     []ledger
 	instruments [][2]string
 	prices      map[string]float64
+	aliases     map[[2]string][][2]string
 }
 
 func (s *Server) loadBook(ctx context.Context, portfolioID string) (book, error) {
@@ -407,6 +409,11 @@ func (s *Server) loadBook(ctx context.Context, portfolioID string) (book, error)
 			}
 		}
 		b.ledgers = append(b.ledgers, l)
+	}
+
+	if err := s.resolvePriceBoards(ctx, &b); err != nil {
+		s.Log.Error("price boards", "error", err)
+		return book{}, status.Error(codes.Internal, "internal error")
 	}
 
 	b.prices, err = s.Store.LatestPrices(ctx, b.instruments)

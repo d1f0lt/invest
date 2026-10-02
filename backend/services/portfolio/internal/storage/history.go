@@ -94,3 +94,36 @@ func (s *Store) DailyCloses(ctx context.Context, instruments [][2]string, from t
 	}
 	return out, rows.Err()
 }
+
+type BoardPrice struct {
+	Board       string
+	CollectedAt time.Time
+}
+
+func (s *Store) PriceBoards(ctx context.Context, secids []string) (map[string][]BoardPrice, error) {
+	out := make(map[string][]BoardPrice, len(secids))
+	if len(secids) == 0 {
+		return out, nil
+	}
+	const stmt = `
+		SELECT lp.secid, lp.board, lp.collected_at
+		FROM latest_prices lp
+		JOIN securities s ON s.secid = lp.secid AND s.board = lp.board
+		WHERE lp.secid = ANY($1)
+		AND lp.last_price IS NOT NULL
+	`
+	rows, err := s.db.QueryContext(ctx, stmt, pq.StringArray(secids))
+	if err != nil {
+		return nil, fmt.Errorf("select price boards: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var secid string
+		var b BoardPrice
+		if err := rows.Scan(&secid, &b.Board, &b.CollectedAt); err != nil {
+			return nil, fmt.Errorf("scan price board: %w", err)
+		}
+		out[secid] = append(out[secid], b)
+	}
+	return out, rows.Err()
+}
