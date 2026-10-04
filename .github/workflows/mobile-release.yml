@@ -73,10 +73,11 @@ jobs:
 
       - name: Check signature
         run: |
+          set -o pipefail
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          certs=$("$apksigner" verify --print-certs "invest-$GITHUB_REF_NAME.apk")
-          echo "$certs" | grep 'Signer #1 certificate DN'
-          if echo "$certs" | grep -q 'CN=Android Debug'; then
+          echo "apksigner: $apksigner"
+          "$apksigner" verify --verbose --print-certs "invest-$GITHUB_REF_NAME.apk" | tee "$RUNNER_TEMP/certs.txt"
+          if grep -q 'CN=Android Debug' "$RUNNER_TEMP/certs.txt"; then
             echo "APK подписан debug-ключом" >&2
             exit 1
           fi
