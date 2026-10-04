@@ -10,6 +10,11 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/backend.yml"
+  workflow_call:
+    inputs:
+      docker:
+        type: boolean
+        default: true
 
 concurrency:
   group: backend-${{ github.ref }}
@@ -140,6 +145,7 @@ jobs:
 
   docker:
     name: docker build (${{ matrix.service }})
+    if: inputs.docker != false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

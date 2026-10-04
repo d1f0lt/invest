@@ -1,0 +1,8 @@
+{
+	https_port 8443
+}
+
+{$API_DOMAIN} {
+	encode gzip
+	reverse_proxy gateway:8080
+}
