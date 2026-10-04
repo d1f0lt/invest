@@ -1,3 +1,5 @@
+name: backend
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -49,6 +51,7 @@ services:
       retries: 10
 
   price_updater:
+    image: ghcr.io/d1f0lt/invest/price_updater:${IMAGE_TAG:-latest}
     build:
       context: ./services/price_updater
     restart: unless-stopped
@@ -86,6 +89,7 @@ services:
   # stays this service's own directory, same as every non-gRPC service
   # here.
   securities_reader:
+    image: ghcr.io/d1f0lt/invest/securities_reader:${IMAGE_TAG:-latest}
     build:
       context: ./services/securities_reader
     restart: unless-stopped
@@ -111,6 +115,7 @@ services:
   # conversion applies here (GRPC_ADDR, --healthcheck) - see
   # securities_reader's comment for the full explanation.
   users:
+    image: ghcr.io/d1f0lt/invest/users:${IMAGE_TAG:-latest}
     build:
       context: ./services/users
     restart: unless-stopped
@@ -147,6 +152,7 @@ services:
   # No external port - see securities_reader's comment above. Same gRPC
   # conversion applies here.
   portfolio:
+    image: ghcr.io/d1f0lt/invest/portfolio:${IMAGE_TAG:-latest}
     build:
       context: ./services/portfolio
     restart: unless-stopped
@@ -168,6 +174,7 @@ services:
   # of latest_prices. Without TELEGRAM_BOT_TOKEN it runs but sends nothing.
   # See services/notifier/README.md.
   notifier:
+    image: ghcr.io/d1f0lt/invest/notifier:${IMAGE_TAG:-latest}
     build:
       context: ./services/notifier
     restart: unless-stopped
@@ -288,6 +295,7 @@ services:
   # server is gRPC too (GRPC_ADDR, was HTTP_ADDR, --healthcheck instead
   # of wget) - see architecture-decisions.md.
   parser:
+    image: ghcr.io/d1f0lt/invest/parser:${IMAGE_TAG:-latest}
     # The image generates its gRPC code from portfolio's .proto (see
     # parser/Dockerfile), which lives outside this build context - passed
     # in as a named build context.
@@ -331,6 +339,7 @@ services:
   # host:port, no http:// scheme) replacing *_BASE_URL, and the
   # healthcheck staying wget-based.
   gateway:
+    image: ghcr.io/d1f0lt/invest/gateway:${IMAGE_TAG:-latest}
     # The image generates its gRPC code from the owners' .proto files (see
     # gateway/Dockerfile), which live outside this build context - passed
     # in as named build contexts.
@@ -374,14 +383,38 @@ services:
       REPORTS_BUCKET: reports
       MAX_UPLOAD_BYTES: "33554432"
       LOG_LEVEL: info
+    # GATEWAY_BIND=127.0.0.1 on the server: the public entry point there is
+    # caddy (HTTPS) below, and Docker publishes ports past ufw.
     ports:
-      - "8080:8080"
+      - "${GATEWAY_BIND:-0.0.0.0}:8080:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # HTTPS in front of gateway, only on the server 
+  # served on 8443, not 443: 443 on the server belongs to the VPN (xray).
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "8443:8443"
+      - "8443:8443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   postgres_data:
   s3_data:
+  caddy_data:
+  caddy_config:
