@@ -1,0 +1,991 @@
+openapi: 3.1.0
+info:
+  title: invest gateway API
+  version: "1.0.0"
+  description: |
+    Внешний REST API единственной публичной точки входа `gateway`.
+    Инструкция запуска Swagger UI — rest-api.md в этой же папке.
+    Источник истины — backend/services/gateway/internal/httpapi.
+servers:
+  - url: https://d1f0lt-invest.duckdns.org:8443
+    description: production
+  - url: http://localhost:8080
+    description: локальный docker compose
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+    description: Регистрация, вход, токены
+  - name: profile
+    description: Профиль пользователя
+  - name: market
+    description: Рыночные данные MOEX
+  - name: portfolios
+    description: Портфели, сделки, аналитика
+  - name: reports
+    description: Брокеры и импорт отчётов
+  - name: alerts
+    description: Уведомления о цене и Telegram
+  - name: service
+    description: Служебные маршруты
+
+paths:
+  /api/v1/users:
+    post:
+      tags: [auth]
+      summary: Регистрация
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { description: Создан, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/login:
+    post:
+      tags: [auth]
+      summary: Вход
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Пара токенов, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/refresh:
+    post:
+      tags: [auth]
+      summary: Обновление пары токенов (ротация)
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshTokenRequest' }
+      responses:
+        '200': { description: Новая пара токенов, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/logout:
+    post:
+      tags: [auth]
+      summary: Отзыв refresh-токена (идемпотентно)
+      operationId: logout
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshTokenRequest' }
+      responses:
+        '204': { description: Отозван }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/me:
+    get:
+      tags: [profile]
+      summary: Текущий пользователь
+      operationId: getMe
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [profile]
+      summary: Изменить email и/или логин
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeRequest' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [profile]
+      summary: Удалить аккаунт
+      operationId: deleteMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordRequest' }
+      responses:
+        '204': { description: Удалён }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/me/password:
+    post:
+      tags: [profile]
+      summary: Сменить пароль (остальные сессии отзываются)
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '200': { description: Новая пара токенов, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/users/{id}:
+    get:
+      tags: [profile]
+      summary: Пользователь по id
+      operationId: getUser
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/prices:
+    get:
+      tags: [market]
+      summary: Последние цены
+      operationId: getPrices
+      parameters:
+        - name: tickers
+          in: query
+          required: false
+          description: SECID через запятую; без параметра — все бумаги
+          schema: { type: string, example: 'SBER,GAZP' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, prices]
+                properties:
+                  count: { type: integer }
+                  prices: { type: array, items: { $ref: '#/components/schemas/Price' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/prices/{secid}/candles:
+    get:
+      tags: [market]
+      summary: Свечи для графика
+      description: Все свечи читаются из БД, загрузку из MOEX выполняет price_updater. Доступная глубина истории зависит от BACKFILL_DAYS и прогресса загрузки.
+      operationId: getCandles
+      parameters:
+        - { $ref: '#/components/parameters/SecId' }
+        - { $ref: '#/components/parameters/Board' }
+        - name: range
+          in: query
+          required: false
+          schema: { type: string, enum: [day, week, month, year, 5y, all], default: day }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CandlesResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/securities:
+    get:
+      tags: [market]
+      summary: Поиск бумаг по тикеру, названию, ISIN
+      operationId: searchSecurities
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, securities]
+                properties:
+                  count: { type: integer }
+                  securities: { type: array, items: { $ref: '#/components/schemas/Price' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/securities/{secid}/info:
+    get:
+      tags: [market]
+      summary: Описание бумаги
+      description: Чтение из БД. price_updater обновляет описание и эмитента из MOEX раз в 12 часов.
+      operationId: getSecurityInfo
+      parameters:
+        - { $ref: '#/components/parameters/SecId' }
+        - { $ref: '#/components/parameters/Board' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SecurityInfo' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/securities/{secid}/dividends:
+    get:
+      tags: [market]
+      summary: История и прогноз дивидендов
+      description: Чтение из БД. price_updater обновляет данные из dohod.ru раз в 24 часа. До первой успешной загрузки возвращается 502.
+      operationId: getDividends
+      parameters:
+        - { $ref: '#/components/parameters/SecId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secid, count, dividends]
+                properties:
+                  secid: { type: string }
+                  count: { type: integer }
+                  dividends: { type: array, items: { $ref: '#/components/schemas/Dividend' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/v1/portfolios:
+    post:
+      tags: [portfolios]
+      summary: Создать портфель (обычный или составной)
+      operationId: createPortfolio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePortfolioRequest' }
+      responses:
+        '201': { description: Создан, content: { application/json: { schema: { $ref: '#/components/schemas/Portfolio' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    get:
+      tags: [portfolios]
+      summary: Портфели пользователя
+      operationId: listPortfolios
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Portfolio' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/portfolios/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [portfolios]
+      summary: Портфель
+      operationId: getPortfolio
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Portfolio' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [portfolios]
+      summary: Переименовать портфель
+      operationId: updatePortfolio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Portfolio' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/trades:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    post:
+      tags: [portfolios]
+      summary: Добавить сделку вручную
+      operationId: createTrade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTradeRequest' }
+      responses:
+        '201': { description: Создана, content: { application/json: { schema: { $ref: '#/components/schemas/Trade' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      tags: [portfolios]
+      summary: Сделки портфеля
+      operationId: listTrades
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Trade' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/holdings:
+    get:
+      tags: [portfolios]
+      summary: Текущие позиции
+      operationId: getHoldings
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Holding' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/pnl:
+    get:
+      tags: [portfolios]
+      summary: Прибыль/убыток по бумагам и итоги
+      operationId: getPnL
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PnLSummary' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/history:
+    get:
+      tags: [portfolios]
+      summary: Стоимость портфеля по дням
+      operationId: getValueHistory
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - name: range
+          in: query
+          required: false
+          schema: { type: string, enum: [week, month, year, all], default: all }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [range, points]
+                properties:
+                  range: { type: string }
+                  points: { type: array, items: { $ref: '#/components/schemas/ValuePoint' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/cash-operations:
+    get:
+      tags: [portfolios]
+      summary: Денежные операции портфеля
+      operationId: listCashOperations
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CashOperation' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/brokers:
+    get:
+      tags: [reports]
+      summary: Поддерживаемые брокеры
+      operationId: listBrokers
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Broker' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/portfolios/{id}/reports:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    post:
+      tags: [reports]
+      summary: Загрузить отчёт брокера (асинхронный разбор)
+      operationId: uploadReport
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, broker]
+              properties:
+                file: { type: string, format: binary, description: 'не больше 32 МиБ' }
+                broker: { type: string, example: sber }
+      responses:
+        '202': { description: Принят в очередь, content: { application/json: { schema: { $ref: '#/components/schemas/ReportImport' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+    get:
+      tags: [reports]
+      summary: Импорты отчётов (новые сверху)
+      operationId: listReportImports
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ReportImport' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/portfolios/{id}/reports/{report_id}:
+    get:
+      tags: [reports]
+      summary: Статус импорта отчёта
+      operationId: getReportImport
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - name: report_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReportImport' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/alerts:
+    post:
+      tags: [alerts]
+      summary: Создать уведомление о цене
+      operationId: createAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAlertRequest' }
+      responses:
+        '201': { description: Создано, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      tags: [alerts]
+      summary: Уведомления пользователя
+      operationId: listAlerts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alerts]
+                properties:
+                  alerts: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/alerts/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    put:
+      tags: [alerts]
+      summary: Изменить цель и/или бумагу (статус снова active)
+      operationId: updateAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAlertRequest' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      tags: [alerts]
+      summary: Удалить уведомление
+      operationId: deleteAlert
+      responses:
+        '204': { description: Удалено }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/telegram/link:
+    post:
+      tags: [alerts]
+      summary: Одноразовая ссылка для привязки Telegram
+      operationId: createTelegramLink
+      responses:
+        '201':
+          description: Создана
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expires_at]
+                properties:
+                  url: { type: string, format: uri, example: 'https://t.me/invest_bot?start=abc' }
+                  expires_at: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/telegram:
+    get:
+      tags: [alerts]
+      summary: Состояние привязки Telegram
+      operationId: getTelegramLink
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, bot_enabled]
+                properties:
+                  linked: { type: boolean }
+                  username: { type: string }
+                  linked_at: { type: string, format: date-time }
+                  bot_enabled: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [alerts]
+      summary: Отвязать Telegram
+      operationId: deleteTelegramLink
+      responses:
+        '204': { description: Отвязан }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /static/brokers/{file}:
+    get:
+      tags: [service]
+      summary: Иконка брокера
+      operationId: getBrokerIcon
+      security: []
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string, example: sber.png }
+      responses:
+        '200': { description: PNG, content: { image/png: { schema: { type: string, format: binary } } } }
+        '404': { description: Нет файла }
+
+  /healthz:
+    get:
+      tags: [service]
+      summary: Состояние gateway и зависимостей
+      operationId: healthz
+      security: []
+      responses:
+        '200': { description: Все зависимости доступны }
+        '503':
+          description: Есть проблемы
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: string }
+                example: { rabbitmq: 'connection closed' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SecId:
+      name: secid
+      in: path
+      required: true
+      schema: { type: string, example: SBER }
+    Board:
+      name: board
+      in: query
+      required: false
+      description: нужен, только если бумага торгуется на нескольких режимах
+      schema: { type: string, example: TQBR }
+
+  responses:
+    BadRequest:
+      description: Невалидный запрос
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: Нет или неверный токен / учётные данные
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Неверный пароль
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Не найдено или принадлежит другому пользователю
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: Email или логин заняты
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unprocessable:
+      description: Нарушено предусловие (FailedPrecondition)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    BadGateway:
+      description: Внутренний сервис или хранилище недоступны
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        username: { type: string }
+        password: { type: string, minLength: 8 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      additionalProperties: false
+      properties:
+        refresh_token: { type: string }
+
+    UpdateMeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        username: { type: string, description: 'пустая строка сбрасывает логин' }
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      additionalProperties: false
+      properties:
+        current_password: { type: string }
+        new_password: { type: string, minLength: 8 }
+
+    PasswordRequest:
+      type: object
+      required: [password]
+      additionalProperties: false
+      properties:
+        password: { type: string }
+
+    LoginResponse:
+      type: object
+      required: [access_token, expires_at, user_id, refresh_token, refresh_token_expires_at]
+      properties:
+        access_token: { type: string, description: 'JWT HS256, TTL 30 минут' }
+        expires_at: { type: string, format: date-time }
+        user_id: { type: string, format: uuid }
+        refresh_token: { type: string, description: 'TTL 30 дней, одноразовый' }
+        refresh_token_expires_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        username: { type: string }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+
+    Price:
+      type: object
+      required: [secid, board, collected_at]
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        short_name: { type: [string, 'null'] }
+        sec_name: { type: [string, 'null'] }
+        isin: { type: [string, 'null'] }
+        currency: { type: [string, 'null'] }
+        last_price: { type: [number, 'null'], description: 'для облигаций — % от номинала' }
+        open_price: { type: [number, 'null'] }
+        high_price: { type: [number, 'null'] }
+        low_price: { type: [number, 'null'] }
+        value_today: { type: [number, 'null'] }
+        volume_today: { type: [integer, 'null'] }
+        trading_status: { type: [string, 'null'], description: "'T' — торгуется" }
+        moex_update_time: { type: [string, 'null'] }
+        collected_at: { type: string, format: date-time }
+        prev_close: { type: [number, 'null'] }
+
+    Candle:
+      type: object
+      required: [start, open, high, low, close]
+      properties:
+        start: { type: string, format: date-time }
+        open: { type: number }
+        high: { type: number }
+        low: { type: number }
+        close: { type: number }
+        volume: { type: [integer, 'null'] }
+        value: { type: [number, 'null'] }
+
+    CandlesResponse:
+      type: object
+      required: [secid, board, range, interval, count, candles]
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        range: { type: string, enum: [day, week, month, year, 5y, all] }
+        interval: { type: string, enum: [10min, hour, day, week] }
+        count: { type: integer }
+        candles: { type: array, items: { $ref: '#/components/schemas/Candle' } }
+
+    SecurityInfo:
+      type: object
+      required: [secid, board, fields]
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        fields:
+          type: array
+          items:
+            type: object
+            required: [name, title, value, type]
+            properties:
+              name: { type: string, example: LOTSIZE }
+              title: { type: string, example: Лот }
+              value: { type: string }
+              type: { type: string, enum: [text, number, money, date, percent, bool] }
+              unit: { type: [string, 'null'] }
+
+    Dividend:
+      type: object
+      required: [registry_close_date, value, currency, forecast]
+      properties:
+        registry_close_date: { type: string, format: date }
+        value: { type: number }
+        currency: { type: string }
+        forecast: { type: boolean }
+        declared_date: { type: [string, 'null'], format: date }
+
+    CreatePortfolioRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, description: "пусто — «Основной» / «Составной»" }
+        member_ids:
+          type: array
+          minItems: 2
+          items: { type: string, format: uuid }
+          description: 'id обычных портфелей пользователя; задаёт составной портфель'
+
+    Portfolio:
+      type: object
+      required: [id, name, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        member_ids: { type: array, items: { type: string, format: uuid }, description: 'только у составного' }
+
+    CreateTradeRequest:
+      type: object
+      required: [secid, board, side, quantity, price]
+      additionalProperties: false
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        side: { type: string, enum: [buy, sell] }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        price: { type: number, minimum: 0, description: 'деньги за одну бумагу без НКД' }
+        fee: { type: number, minimum: 0 }
+        currency: { type: string, default: RUB }
+        executed_at: { type: string, format: date-time }
+
+    Trade:
+      type: object
+      required: [id, secid, board, side, quantity, price, fee, currency, executed_at, accrued_interest]
+      properties:
+        id: { type: string, format: uuid }
+        secid: { type: string }
+        board: { type: string }
+        side: { type: string, enum: [buy, sell] }
+        quantity: { type: number }
+        price: { type: number }
+        fee: { type: number }
+        currency: { type: string }
+        executed_at: { type: string, format: date-time }
+        accrued_interest: { type: number }
+        external_id: { type: string }
+
+    Holding:
+      type: object
+      required: [secid, board, quantity, avg_cost]
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        quantity: { type: number }
+        avg_cost: { type: number }
+        current_price: { type: number }
+        market_value: { type: number }
+        unrealized_pnl: { type: number }
+        day_change: { type: number }
+
+    InstrumentPnL:
+      allOf:
+        - $ref: '#/components/schemas/Holding'
+        - type: object
+          required: [realized_pnl, total_pnl, dividends, coupons, accrued_interest]
+          properties:
+            realized_pnl: { type: number }
+            total_pnl: { type: number }
+            dividends: { type: number }
+            coupons: { type: number }
+            accrued_interest: { type: number }
+
+    PnLSummary:
+      type: object
+      required: [instruments, total_realized_pnl, total_unrealized_pnl, total_pnl, total_dividends,
+                 total_coupons, total_accrued_interest, total_taxes, total_fees, total_other,
+                 net_deposits, cash_balance, total_day_change]
+      properties:
+        instruments: { type: array, items: { $ref: '#/components/schemas/InstrumentPnL' } }
+        total_realized_pnl: { type: number }
+        total_unrealized_pnl: { type: number }
+        total_pnl: { type: number }
+        total_dividends: { type: number }
+        total_coupons: { type: number }
+        total_accrued_interest: { type: number }
+        total_taxes: { type: number, maximum: 0 }
+        total_fees: { type: number, maximum: 0 }
+        total_other: { type: number }
+        net_deposits: { type: number }
+        cash_balance: { type: number }
+        total_day_change: { type: number }
+
+    ValuePoint:
+      type: object
+      required: [date, value, net_deposits]
+      properties:
+        date: { type: string, format: date-time }
+        value: { type: number }
+        net_deposits: { type: number }
+
+    CashOperation:
+      type: object
+      required: [id, type, amount, currency, occurred_at, description]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [deposit, withdrawal, dividend, coupon, redemption, tax, fee, other] }
+        amount: { type: number, description: '> 0 — поступление на счёт' }
+        currency: { type: string }
+        occurred_at: { type: string, format: date-time }
+        secid: { type: string }
+        board: { type: string }
+        description: { type: string }
+        external_id: { type: string }
+
+    Broker:
+      type: object
+      required: [id, name, file_formats]
+      properties:
+        id: { type: string, example: sber }
+        name: { type: string, example: СберИнвестиции }
+        file_formats: { type: array, items: { type: string }, example: [html] }
+        icon_url: { type: string, example: /static/brokers/sber.png }
+        color: { type: string, example: '#21A038' }
+
+    ReportImport:
+      type: object
+      required: [id, task_id, portfolio_id, broker_id, filename, status, trades_created, trades_skipped,
+                 cash_operations_created, cash_operations_skipped, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        portfolio_id: { type: string, format: uuid }
+        broker_id: { type: string }
+        filename: { type: string }
+        status: { type: string, enum: [queued, processing, done, failed] }
+        error: { type: string, description: 'текст для пользователя при failed' }
+        trades_created: { type: integer }
+        trades_skipped: { type: integer }
+        cash_operations_created: { type: integer }
+        cash_operations_skipped: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+
+    CreateAlertRequest:
+      type: object
+      required: [secid]
+      additionalProperties: false
+      description: ровно одно из target_price и change_percent
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        target_price: { type: number, exclusiveMinimum: 0 }
+        change_percent: { type: number }
+
+    UpdateAlertRequest:
+      type: object
+      additionalProperties: false
+      description: ровно одно из target_price и change_percent; secid/board — сменить бумагу
+      properties:
+        secid: { type: string }
+        board: { type: string }
+        target_price: { type: number, exclusiveMinimum: 0 }
+        change_percent: { type: number }
+
+    Alert:
+      type: object
+      required: [id, secid, board, short_name, direction, base_price, target_price, change_percent,
+                 price_in_percent, currency, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        secid: { type: string }
+        board: { type: string }
+        short_name: { type: string }
+        direction: { type: string, enum: [above, below] }
+        base_price: { type: number }
+        target_price: { type: number }
+        change_percent: { type: number }
+        input_percent: { type: [number, 'null'] }
+        current_price: { type: [number, 'null'] }
+        price_in_percent: { type: boolean }
+        currency: { type: string }
+        status: { type: string, enum: [active, triggered] }
+        triggered_at: { type: [string, 'null'], format: date-time }
+        triggered_price: { type: [number, 'null'] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
