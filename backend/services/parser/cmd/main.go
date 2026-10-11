@@ -48,13 +48,13 @@ func main() {
 	defer stop()
 
 	store, err := objectstore.New(objectstore.Config{
-		Endpoint:  cfg.MinIOEndpoint,
-		AccessKey: cfg.MinIOAccessKey,
-		SecretKey: cfg.MinIOSecretKey,
-		UseSSL:    cfg.MinIOUseSSL,
+		Endpoint:  cfg.S3Endpoint,
+		AccessKey: cfg.S3AccessKey,
+		SecretKey: cfg.S3SecretKey,
+		UseSSL:    cfg.S3UseSSL,
 	})
 	if err != nil {
-		log.Error("failed to create minio client", "error", err)
+		log.Error("failed to create S3 client", "error", err)
 		os.Exit(1)
 	}
 

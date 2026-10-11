@@ -87,7 +87,7 @@ func (h *ReportsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	objectKey := fmt.Sprintf("%s/%s_%s", portfolioID, taskID, filename)
 
 	if err := h.Store.Upload(r.Context(), h.Bucket, objectKey, file, header.Size, contentType); err != nil {
-		h.Log.Error("upload report to minio", "error", err, "task_id", taskID)
+		h.Log.Error("upload report to S3", "error", err, "task_id", taskID)
 		h.failImport(r.Context(), userID, taskID, "Не удалось сохранить файл. Попробуйте ещё раз")
 		writeError(w, http.StatusBadGateway, "failed to store the report")
 		return

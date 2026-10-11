@@ -26,23 +26,26 @@ func New(cfg Config) (*Store, error) {
 		Secure: cfg.UseSSL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create minio client: %w", err)
+		return nil, fmt.Errorf("create S3 client: %w", err)
 	}
 	return &Store{client: client}, nil
 }
 
-func (s *Store) Download(ctx context.Context, bucket, key string) ([]byte, error) {
-	obj, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+func (s *Store) Upload(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
+	_, err := s.client.PutObject(ctx, bucket, key, r, size, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get object %s/%s: %w", bucket, key, err)
+		return fmt.Errorf("put object %s/%s: %w", bucket, key, err)
 	}
-	defer obj.Close()
+	return nil
+}
 
-	data, err := io.ReadAll(obj)
-	if err != nil {
-		return nil, fmt.Errorf("read object %s/%s: %w", bucket, key, err)
+func (s *Store) Remove(ctx context.Context, bucket, key string) error {
+	if err := s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("remove object %s/%s: %w", bucket, key, err)
 	}
-	return data, nil
+	return nil
 }
 
 func (s *Store) Ping(ctx context.Context) error {

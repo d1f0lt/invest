@@ -84,7 +84,7 @@ func (w *Worker) handle(ctx context.Context, d amqp.Delivery) {
 
 	data, err := w.Store.Download(ctx, t.Bucket, t.ObjectKey)
 	if err != nil {
-		log.Error("download report from minio, requeueing", "error", err)
+		log.Error("download report from S3, requeueing", "error", err)
 		_ = d.Nack(false, true)
 		return
 	}

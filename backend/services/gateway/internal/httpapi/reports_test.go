@@ -255,7 +255,7 @@ func TestUpload_PublishFails_RollsBackStoredObject(t *testing.T) {
 
 func TestUpload_StoreFails_MarksImportFailed(t *testing.T) {
 	store := newFakeReportStore()
-	store.uploadErr = errors.New("minio down")
+	store.uploadErr = errors.New("s3 down")
 	queue := &fakeReportQueue{}
 	client := &fakePortfolioClient{}
 	h := newTestReportsHandler(store, queue, client)
@@ -298,7 +298,7 @@ func TestUpload_PublishFailsAfterClientDisconnect_RollbackStillRuns(t *testing.T
 
 func TestUpload_PublishFailsAndRollbackFails_StillResponds502(t *testing.T) {
 	store := newFakeReportStore()
-	store.removeErr = errors.New("minio down too")
+	store.removeErr = errors.New("s3 down too")
 	queue := &fakeReportQueue{err: errors.New("rabbit down")}
 	h := newTestReportsHandler(store, queue, &fakePortfolioClient{})
 

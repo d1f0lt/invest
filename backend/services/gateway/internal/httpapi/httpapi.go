@@ -99,7 +99,7 @@ func (h *Handlers) healthz(w http.ResponseWriter, r *http.Request) {
 		problems["rabbitmq"] = err.Error()
 	}
 	if err := h.Store.Ping(r.Context()); err != nil {
-		problems["minio"] = err.Error()
+		problems["s3"] = err.Error()
 	}
 
 	if len(problems) > 0 {

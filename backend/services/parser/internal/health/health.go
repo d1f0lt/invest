@@ -27,7 +27,7 @@ func (s *Server) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest
 		errs = append(errs, errors.New("rabbitmq: "+err.Error()))
 	}
 	if err := s.Store.Ping(ctx); err != nil {
-		errs = append(errs, errors.New("minio: "+err.Error()))
+		errs = append(errs, errors.New("s3: "+err.Error()))
 	}
 	if len(errs) > 0 {
 		if s.OnUnhealthy != nil {

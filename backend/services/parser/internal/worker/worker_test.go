@@ -158,7 +158,7 @@ func TestHandle_UnknownInstrument(t *testing.T) {
 
 func TestHandle_TransientErrorsRequeueWithoutFailing(t *testing.T) {
 	pf := &fakePortfolio{}
-	ack := runTask(t, fakeStore{err: errors.New("minio down")}, fakeParser{report: oneTrade}, pf)
+	ack := runTask(t, fakeStore{err: errors.New("s3 down")}, fakeParser{report: oneTrade}, pf)
 	if !ack.requeued {
 		t.Errorf("download error: ack = %+v, want requeue", ack)
 	}

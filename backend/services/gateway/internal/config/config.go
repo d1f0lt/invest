@@ -22,10 +22,10 @@ type Config struct {
 	RabbitMQURL   string
 	RabbitMQQueue string
 
-	MinIOEndpoint  string
-	MinIOAccessKey string
-	MinIOSecretKey string
-	MinIOUseSSL    bool
+	S3Endpoint  string
+	S3AccessKey string
+	S3SecretKey string
+	S3UseSSL    bool
 
 	ReportsBucket string
 
@@ -43,9 +43,9 @@ func Load() (Config, error) {
 		NotifierGRPCAddr:         getEnv("NOTIFIER_GRPC_ADDR", "localhost:8085"),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "report.uploaded"),
-		MinIOEndpoint:            getEnv("MINIO_ENDPOINT", "localhost:9000"),
-		MinIOAccessKey:           getEnv("MINIO_ACCESS_KEY", ""),
-		MinIOSecretKey:           getEnv("MINIO_SECRET_KEY", ""),
+		S3Endpoint:               getEnv("S3_ENDPOINT", "localhost:9000"),
+		S3AccessKey:              getEnv("S3_ACCESS_KEY", ""),
+		S3SecretKey:              getEnv("S3_SECRET_KEY", ""),
 		ReportsBucket:            getEnv("REPORTS_BUCKET", "reports"),
 		LogLevel:                 getEnv("LOG_LEVEL", "info"),
 	}
@@ -62,14 +62,14 @@ func Load() (Config, error) {
 	}
 	cfg.UpstreamTimeout = timeout
 
-	useSSL, err := strconv.ParseBool(getEnv("MINIO_USE_SSL", "false"))
+	useSSL, err := strconv.ParseBool(getEnv("S3_USE_SSL", "false"))
 	if err != nil {
-		return Config{}, fmt.Errorf("MINIO_USE_SSL must be true or false: %w", err)
+		return Config{}, fmt.Errorf("S3_USE_SSL must be true or false: %w", err)
 	}
-	cfg.MinIOUseSSL = useSSL
+	cfg.S3UseSSL = useSSL
 
-	if cfg.MinIOAccessKey == "" || cfg.MinIOSecretKey == "" {
-		return Config{}, fmt.Errorf("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set")
+	if cfg.S3AccessKey == "" || cfg.S3SecretKey == "" {
+		return Config{}, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY must be set")
 	}
 
 	maxUpload, err := parseSizeEnv("MAX_UPLOAD_BYTES", 32<<20)

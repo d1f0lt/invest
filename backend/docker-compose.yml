@@ -202,13 +202,6 @@ services:
   # services/gateway/README.md, services/parser/README.md and
   # architecture-decisions.md ("parser: асинхронный разбор отчётов").
   #
-  # SeaweedFS instead of MinIO since 2026-09-24: MinIO stopped publishing
-  # community images (Docker Hub minio/minio and minio/mc are gone, and
-  # the pinned quay.io references failed to resolve). gateway/parser keep
-  # using the minio-go client - it is a plain S3 client and works against
-  # any S3-compatible server; env names MINIO_* in those services are kept
-  # as-is. Hostname "s3" so nothing in the services is MinIO-specific.
-  #
   # One container runs master + volume + filer + S3 gateway. The S3
   # credentials come from backend/.env and are written into the S3 identity
   # config at startup ($$ = a literal $ for the container's shell).
@@ -312,10 +305,10 @@ services:
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded
-      MINIO_ENDPOINT: s3:9000
-      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${S3_SECRET_KEY}
-      MINIO_USE_SSL: "false"
+      S3_ENDPOINT: s3:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_USE_SSL: "false"
       PORTFOLIO_GRPC_ADDR: portfolio:8083
       GRPC_ADDR: ":8084"
       LOG_LEVEL: info
@@ -376,10 +369,10 @@ services:
       UPSTREAM_TIMEOUT: 15s
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded
-      MINIO_ENDPOINT: s3:9000
-      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${S3_SECRET_KEY}
-      MINIO_USE_SSL: "false"
+      S3_ENDPOINT: s3:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_USE_SSL: "false"
       REPORTS_BUCKET: reports
       MAX_UPLOAD_BYTES: "33554432"
       LOG_LEVEL: info

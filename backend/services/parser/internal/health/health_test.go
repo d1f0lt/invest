@@ -45,7 +45,7 @@ func TestCheck_QueueDownReportsNotServingAndCallsOnUnhealthy(t *testing.T) {
 func TestCheck_BothDown(t *testing.T) {
 	s := &Server{
 		Queue: fakePinger{err: errors.New("rabbit down")},
-		Store: fakePinger{err: errors.New("minio down")},
+		Store: fakePinger{err: errors.New("s3 down")},
 	}
 	resp, err := s.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
