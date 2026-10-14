@@ -175,8 +175,9 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 }
 
 const (
-	IntervalHour = "1h"
-	IntervalDay  = "1d"
+	IntervalTenMinutes = "10m"
+	IntervalHour       = "1h"
+	IntervalDay        = "1d"
 )
 
 type Candle struct {
@@ -323,4 +324,56 @@ func copyRows(ctx context.Context, tx *sql.Tx, table string, columns []string, r
 		return fmt.Errorf("close copy into %s: %w", table, err)
 	}
 	return nil
+}
+
+type IntradayTarget struct {
+	SecID string
+	Board string
+	Day   time.Time
+}
+
+func (s *Store) IntradayTargets(ctx context.Context, boards []string) ([]IntradayTarget, error) {
+	rows, err := s.db.QueryContext(ctx, `
+  SELECT s.secid, s.board, d.start_at
+  FROM securities s
+  JOIN LATERAL (
+   SELECT start_at, updated_at FROM candles
+   WHERE secid = s.secid AND board = s.board AND interval = '1d'
+   ORDER BY start_at DESC LIMIT 1
+  ) d ON true
+  WHERE s.board = ANY($1)
+ AND NOT EXISTS (
+  SELECT 1 FROM candles c WHERE c.secid = s.secid AND c.board = s.board
+   AND c.interval = '10m' AND c.start_at >= d.start_at AND c.updated_at >= d.updated_at
+ )
+  ORDER BY s.board, s.secid
+ `, pq.Array(boards))
+	if err != nil {
+		return nil, fmt.Errorf("intraday targets: %w", err)
+	}
+	defer rows.Close()
+	var out []IntradayTarget
+	for rows.Next() {
+		var target IntradayTarget
+		if err := rows.Scan(&target.SecID, &target.Board, &target.Day); err != nil {
+			return nil, err
+		}
+		out = append(out, target)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) PruneIntradayCandles(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+  DELETE FROM candles c USING (
+   SELECT secid, board,
+    date_trunc('day', max(start_at) AT TIME ZONE 'Europe/Moscow') AT TIME ZONE 'Europe/Moscow' AS last_day
+   FROM candles WHERE interval = '10m' GROUP BY secid, board
+  ) l
+  WHERE c.interval = '10m' AND c.secid = l.secid AND c.board = l.board AND c.start_at < l.last_day
+ `)
+	if err != nil {
+		return 0, fmt.Errorf("prune intraday candles: %w", err)
+	}
+	return res.RowsAffected()
 }

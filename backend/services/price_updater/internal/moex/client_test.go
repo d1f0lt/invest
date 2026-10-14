@@ -8,50 +8,6 @@ import (
 	"time"
 )
 
-var msk = time.FixedZone("MSK", 3*3600)
-
-func TestIntradayCandles(t *testing.T) {
-	var gotPath, gotQuery string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-		w.Write([]byte(`{"candles": {"columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"], "data": [
-			[279.1, 279.5, 279.8, 279.0, 1.5e8, 540000, "2026-09-25 10:00:00", "2026-09-25 10:09:59"],
-			[279.5, 278.9, 279.6, 278.8, 9.1e7, 320000, "2026-09-25 10:10:00", "2026-09-25 10:19:59"]
-		]}}`))
-	}))
-	defer srv.Close()
-
-	c := New(srv.URL, time.Second)
-	got, err := c.IntradayCandles(context.Background(), "SBER", "TQBR", time.Date(2026, 9, 25, 0, 0, 0, 0, msk), msk)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotPath != "/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles.json" {
-		t.Errorf("path = %s", gotPath)
-	}
-	if gotQuery == "" || !contains(gotQuery, "interval=10") || !contains(gotQuery, "from=2026-09-25") || !contains(gotQuery, "till=2026-09-25") {
-		t.Errorf("query = %s", gotQuery)
-	}
-	if len(got) != 2 || got[1].Close != 278.9 || !got[1].Begin.Equal(time.Date(2026, 9, 25, 10, 10, 0, 0, msk)) {
-		t.Errorf("candles = %+v", got)
-	}
-}
-
-func TestIntradayCandles_BondsMarket(t *testing.T) {
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Write([]byte(`{"candles": {"columns": ["open", "close", "high", "low", "begin"], "data": []}}`))
-	}))
-	defer srv.Close()
-	if _, err := New(srv.URL, time.Second).IntradayCandles(context.Background(), "SU26238RMFS4", "TQOB", time.Now(), msk); err != nil {
-		t.Fatal(err)
-	}
-	if gotPath != "/engines/stock/markets/bonds/boards/TQOB/securities/SU26238RMFS4/candles.json" {
-		t.Errorf("path = %s", gotPath)
-	}
-}
-
 func TestDescriptionAndEmitter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

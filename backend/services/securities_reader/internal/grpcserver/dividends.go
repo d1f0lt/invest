@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"invest/backend/services/securities_reader/internal/moex"
+	"invest/backend/services/securities_reader/internal/storage"
 	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
@@ -28,20 +28,13 @@ func (s *Server) GetDividends(ctx context.Context, req *securitiesreaderpb.GetDi
 	if onlyBonds(boards) {
 		return resp, nil
 	}
-	if s.DividendSource == nil {
-		return nil, status.Error(codes.Unavailable, "dividends source is not configured")
-	}
-
-	s.caches()
-	if cached, ok := s.dividends.get(secid, s.now()); ok {
-		resp.Dividends = cached
-		return resp, nil
-	}
-
-	raw, err := s.DividendSource.Dividends(ctx, secid)
+	raw, loaded, err := s.Store.Dividends(ctx, secid)
 	if err != nil {
-		s.Log.Warn("dividends unavailable", "secid", secid, "error", err)
-		return nil, status.Error(codes.Unavailable, "dividends are temporarily unavailable")
+		s.Log.Error("failed to load dividends", "secid", secid, "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	if !loaded {
+		return nil, status.Error(codes.Unavailable, "dividends have not been loaded yet")
 	}
 
 	seen := make(map[string]bool, len(raw))
@@ -61,14 +54,13 @@ func (s *Server) GetDividends(ctx context.Context, req *securitiesreaderpb.GetDi
 		})
 	}
 	s.Log.Info("dividends loaded", "secid", secid, "count", len(out))
-	s.dividends.put(secid, out, s.now())
 	resp.Dividends = out
 	return resp, nil
 }
 
 func onlyBonds(boards []string) bool {
 	for _, b := range boards {
-		if moex.MarketFor(b) != "bonds" {
+		if !storage.IsBondBoard(b) {
 			return false
 		}
 	}

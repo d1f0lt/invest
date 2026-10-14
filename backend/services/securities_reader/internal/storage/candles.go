@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	IntervalHour = "1h"
-	IntervalDay  = "1d"
+	IntervalTenMinutes = "10m"
+	IntervalHour       = "1h"
+	IntervalDay        = "1d"
 )
 
 type Candle struct {

@@ -15,9 +15,15 @@ import (
 )
 
 type fakeStore struct {
-	all         []storage.PriceView
-	byTicker    map[string]storage.PriceView
-	lastQueried []string
+	metadata        storage.SecurityMetadata
+	metadataErr     error
+	dividends       []storage.Dividend
+	dividendsLoaded bool
+	dividendsErr    error
+	dividendReads   int
+	all             []storage.PriceView
+	byTicker        map[string]storage.PriceView
+	lastQueried     []string
 
 	boards  map[string][]string
 	candles map[string][]storage.Candle

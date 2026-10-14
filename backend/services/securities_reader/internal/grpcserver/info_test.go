@@ -9,8 +9,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"invest/backend/services/securities_reader/internal/dohod"
-	"invest/backend/services/securities_reader/internal/moex"
 	"invest/backend/services/securities_reader/internal/storage"
 	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
@@ -20,81 +18,59 @@ func (f *fakeStore) SecurityRef(_ context.Context, secid, board string) (storage
 	return r, ok, nil
 }
 
-type fakeMoex struct {
-	candles     []moex.Candle
-	candlesErr  error
-	gotDay      time.Time
-	candleCalls int
-	gotInterval int
-	gotFrom     time.Time
-
-	desc    []moex.DescriptionField
-	descErr error
-	issuer  string
-
-	descCall int
+func (f *fakeStore) SecurityMetadata(context.Context, string) (storage.SecurityMetadata, error) {
+	return f.metadata, f.metadataErr
 }
-
-func (m *fakeMoex) IntradayCandles(_ context.Context, _, _ string, day time.Time, _ *time.Location) ([]moex.Candle, error) {
-	m.candleCalls++
-	m.gotDay = day
-	return m.candles, m.candlesErr
-}
-
-func (m *fakeMoex) Candles(_ context.Context, _, _ string, interval int, from, _ time.Time, _ *time.Location) ([]moex.Candle, error) {
-	m.candleCalls++
-	m.gotInterval, m.gotFrom = interval, from
-	return m.candles, m.candlesErr
-}
-
-func (m *fakeMoex) Description(context.Context, string) ([]moex.DescriptionField, error) {
-	m.descCall++
-	return m.desc, m.descErr
-}
-
-func (m *fakeMoex) EmitterTitle(context.Context, string) (string, error) {
-	return m.issuer, nil
+func (f *fakeStore) Dividends(context.Context, string) ([]storage.Dividend, bool, error) {
+	f.dividendReads++
+	return f.dividends, f.dividendsLoaded, f.dividendsErr
 }
 
 func dayRequest() *securitiesreaderpb.GetCandlesRequest {
 	return &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY}
 }
 
-func TestGetCandles_DayFromMoexForLastTradingDay(t *testing.T) {
-	store := &fakeStore{
-		boards: map[string][]string{"SBER": {"TQBR"}},
-		candles: map[string][]storage.Candle{
-			storage.IntervalDay:  {{Start: at(25, 0)}},
-			storage.IntervalHour: {{Start: at(25, 13), Close: 9}},
-		},
-	}
-	m := &fakeMoex{candles: []moex.Candle{
-		{Begin: at(25, 10), Open: 1, High: 2, Low: 1, Close: 2},
-		{Begin: at(25, 10).Add(10 * time.Minute), Open: 2, High: 3, Low: 2, Close: 3},
+func TestGetCandles_DayReadsDatabaseWithoutMoex(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, candles: map[string][]storage.Candle{
+		storage.IntervalTenMinutes: {{Start: at(24, 10), Close: 1}, {Start: at(25, 10), Close: 2}, {Start: at(25, 10).Add(10 * time.Minute), Close: 3}},
 	}}
 	s := candlesServer(store, at(26, 12))
-	s.Moex = m
-
 	resp, err := s.GetCandles(context.Background(), dayRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES || len(resp.Candles) != 2 || resp.Candles[1].Close != 3 {
-		t.Errorf("resp = %+v", resp)
+		t.Fatalf("resp = %+v", resp)
 	}
-	if !m.gotDay.Equal(at(25, 0)) {
-		t.Errorf("day = %v, want last daily candle 25 Sep", m.gotDay)
-	}
-
-	if _, err := s.GetCandles(context.Background(), dayRequest()); err != nil {
-		t.Fatal(err)
-	}
-	if m.candleCalls != 1 {
-		t.Errorf("moex called %d times, want 1 (cached)", m.candleCalls)
+	if !store.gotFrom.Equal(at(25, 0)) {
+		t.Fatalf("from = %v", store.gotFrom)
 	}
 }
 
-func TestGetCandles_DayFallsBackToHourlyWhenMoexFails(t *testing.T) {
+func TestGetCandles_NewTradingDayUsesFreshHourlyUntilIntradayArrives(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, candles: map[string][]storage.Candle{
+		storage.IntervalTenMinutes: {{Start: at(25, 18), Close: 1}},
+		storage.IntervalHour:       {{Start: at(26, 10), Close: 2}},
+	}}
+	s := candlesServer(store, at(26, 12))
+	resp, err := s.GetCandles(context.Background(), dayRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR || len(resp.Candles) != 1 || resp.Candles[0].Close != 2 {
+		t.Fatalf("resp=%+v", resp)
+	}
+	store.candles[storage.IntervalTenMinutes] = append(store.candles[storage.IntervalTenMinutes], storage.Candle{Start: at(26, 10), Close: 3})
+	resp, err = s.GetCandles(context.Background(), dayRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES || len(resp.Candles) != 1 || resp.Candles[0].Close != 3 {
+		t.Fatalf("resp=%+v", resp)
+	}
+}
+
+func TestGetCandles_DayFallsBackToStoredHourly(t *testing.T) {
 	store := &fakeStore{
 		boards: map[string][]string{"SBER": {"TQBR"}},
 		candles: map[string][]storage.Candle{
@@ -102,7 +78,6 @@ func TestGetCandles_DayFallsBackToHourlyWhenMoexFails(t *testing.T) {
 		},
 	}
 	s := candlesServer(store, at(26, 12))
-	s.Moex = &fakeMoex{candlesErr: errors.New("403")}
 
 	resp, err := s.GetCandles(context.Background(), dayRequest())
 	if err != nil {
@@ -113,27 +88,18 @@ func TestGetCandles_DayFallsBackToHourlyWhenMoexFails(t *testing.T) {
 	}
 }
 
-func TestGetSecurityInfo_MergesMoexAndDatabase(t *testing.T) {
+func TestGetSecurityInfo_MergesStoredMetadataAndReference(t *testing.T) {
 	name, isin := "Сбербанк России ПАО ао", "RU0009029540"
 	lot := int64(10)
 	store := &fakeStore{
 		boards: map[string][]string{"SBER": {"TQBR"}},
 		refs:   map[string]storage.SecurityRef{"SBER|TQBR": {SecName: &name, ISIN: &isin, LotSize: &lot}},
 	}
-	m := &fakeMoex{
-		issuer: "ПАО Сбербанк",
-		desc: []moex.DescriptionField{
-			{Name: "TYPENAME", Value: "Акция обыкновенная"},
-			{Name: "FACEVALUE", Value: "3"},
-			{Name: "FACEUNIT", Value: "SUR"},
-			{Name: "ISSUESIZE", Value: "21586948000"},
-			{Name: "LISTLEVEL", Value: "1"},
-			{Name: "ISQUALIFIEDINVESTORS", Value: "0"},
-			{Name: "MATDATE", Value: ""},
-		},
-	}
+
+	store.metadata = storage.SecurityMetadata{Issuer: "ПАО Сбербанк", Values: map[string]string{
+		"TYPENAME": "Акция обыкновенная", "FACEVALUE": "3", "FACEUNIT": "SUR", "ISSUESIZE": "21586948000", "LISTLEVEL": "1", "ISQUALIFIEDINVESTORS": "0",
+	}}
 	s := candlesServer(store, at(26, 12))
-	s.Moex = m
 
 	resp, err := s.GetSecurityInfo(context.Background(), &securitiesreaderpb.GetSecurityInfoRequest{Secid: "sber"})
 	if err != nil {
@@ -159,20 +125,15 @@ func TestGetSecurityInfo_MergesMoexAndDatabase(t *testing.T) {
 	if _, err := s.GetSecurityInfo(context.Background(), &securitiesreaderpb.GetSecurityInfoRequest{Secid: "SBER"}); err != nil {
 		t.Fatal(err)
 	}
-	if m.descCall != 1 {
-		t.Errorf("moex description called %d times, want 1 (cached)", m.descCall)
-	}
 }
 
-func TestGetSecurityInfo_MoexDownStillReturnsDatabaseFieldsUncached(t *testing.T) {
+func TestGetSecurityInfo_BeforeMetadataLoadReturnsReferenceFields(t *testing.T) {
 	name := "Сбербанк России ПАО ао"
 	store := &fakeStore{
 		boards: map[string][]string{"SBER": {"TQBR"}},
 		refs:   map[string]storage.SecurityRef{"SBER|TQBR": {SecName: &name}},
 	}
-	m := &fakeMoex{descErr: errors.New("timeout")}
 	s := candlesServer(store, at(26, 12))
-	s.Moex = m
 
 	for i := 0; i < 2; i++ {
 		resp, err := s.GetSecurityInfo(context.Background(), &securitiesreaderpb.GetSecurityInfoRequest{Secid: "SBER"})
@@ -183,40 +144,21 @@ func TestGetSecurityInfo_MoexDownStillReturnsDatabaseFieldsUncached(t *testing.T
 			t.Errorf("fields = %+v", resp.Fields)
 		}
 	}
-	if m.descCall != 2 {
-		t.Errorf("moex description called %d times, want 2 (errors are not cached)", m.descCall)
-	}
 }
 
-func TestGetCandles_FiveYearsFromMoexWeekly(t *testing.T) {
-	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, weekly: []storage.Candle{{Start: at(21, 0)}}}
-	m := &fakeMoex{candles: []moex.Candle{{Begin: time.Date(2021, 9, 27, 0, 0, 0, 0, msk), Close: 1}, {Begin: at(21, 0), Close: 2}}}
+func TestGetCandles_FiveYearsFromStoredWeekly(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, weekly: []storage.Candle{
+		{Start: time.Date(2020, 1, 6, 0, 0, 0, 0, msk), Close: 1},
+		{Start: time.Date(2021, 9, 27, 0, 0, 0, 0, msk), Close: 2},
+		{Start: at(21, 0), Close: 3},
+	}}
 	s := candlesServer(store, at(26, 12))
-	s.Moex = m
-
-	req := &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS}
-	resp, err := s.GetCandles(context.Background(), req)
+	resp, err := s.GetCandles(context.Background(), &securitiesreaderpb.GetCandlesRequest{Secid: "SBER", Range: securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK || len(resp.Candles) != 2 {
-		t.Errorf("resp = %+v", resp)
-	}
-	if m.gotInterval != 7 || !m.gotFrom.Equal(time.Date(2021, 9, 26, 0, 0, 0, 0, msk)) {
-		t.Errorf("interval=%d from=%v", m.gotInterval, m.gotFrom)
-	}
-	if _, err := s.GetCandles(context.Background(), req); err != nil {
-		t.Fatal(err)
-	}
-	if m.candleCalls != 1 {
-		t.Errorf("moex called %d times, want 1 (cached)", m.candleCalls)
-	}
-
-	s2 := candlesServer(store, at(26, 12))
-	s2.Moex = &fakeMoex{candlesErr: errors.New("403")}
-	resp, err = s2.GetCandles(context.Background(), req)
-	if err != nil || len(resp.Candles) != 1 {
-		t.Errorf("fallback resp=%v err=%v", resp, err)
+	if resp.Interval != securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK || len(resp.Candles) != 2 || resp.Candles[0].Close != 2 {
+		t.Fatalf("resp = %+v", resp)
 	}
 }
 
@@ -246,27 +188,16 @@ func TestBuildInfoFields_FaceValueOnlyForBonds(t *testing.T) {
 	}
 }
 
-type fakeDividends struct {
-	divs  []dohod.Dividend
-	err   error
-	calls int
-}
-
-func (f *fakeDividends) Dividends(context.Context, string) ([]dohod.Dividend, error) {
-	f.calls++
-	return f.divs, f.err
-}
-
-func TestGetDividends_DedupedCachedWithForecast(t *testing.T) {
+func TestGetDividends_DedupedFromDatabaseWithForecast(t *testing.T) {
 	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}}
-	src := &fakeDividends{divs: []dohod.Dividend{
+	store.dividendsLoaded = true
+	store.dividends = []storage.Dividend{
 		{RegistryCloseDate: "2027-07-20", Value: 44.53, Currency: "RUB", Forecast: true},
 		{RegistryCloseDate: "2026-07-20", Value: 37.64, Currency: "RUB", DeclaredDate: "2026-04-21"},
 		{RegistryCloseDate: "2026-07-20", Value: 37.64, Currency: "RUB"},
 		{RegistryCloseDate: "2025-07-18", Value: 34.84, Currency: "RUB"},
-	}}
+	}
 	s := candlesServer(store, at(26, 12))
-	s.DividendSource = src
 
 	resp, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: " sber "})
 	if err != nil {
@@ -279,27 +210,23 @@ func TestGetDividends_DedupedCachedWithForecast(t *testing.T) {
 	if _, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: "SBER"}); err != nil {
 		t.Fatal(err)
 	}
-	if src.calls != 1 {
-		t.Errorf("source called %d times, want 1 (cached)", src.calls)
+	if store.dividendReads != 2 {
+		t.Errorf("database reads=%d, want 2", store.dividendReads)
 	}
 }
 
-func TestGetDividends_BondsSkipSource(t *testing.T) {
+func TestGetDividends_BondsSkipDividendQuery(t *testing.T) {
 	store := &fakeStore{boards: map[string][]string{"SU26238RMFS4": {"TQOB"}}}
-	src := &fakeDividends{}
 	s := candlesServer(store, at(26, 12))
-	s.DividendSource = src
 	resp, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: "SU26238RMFS4"})
-	if err != nil || len(resp.Dividends) != 0 || src.calls != 0 {
-		t.Errorf("resp=%v err=%v calls=%d", resp, err, src.calls)
+	if err != nil || len(resp.Dividends) != 0 || store.dividendReads != 0 {
+		t.Errorf("resp=%v err=%v calls=%d", resp, err, store.dividendReads)
 	}
 }
 
 func TestGetDividends_Errors(t *testing.T) {
 	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}}
-	src := &fakeDividends{err: errors.New("timeout")}
 	s := candlesServer(store, at(26, 12))
-	s.DividendSource = src
 
 	if _, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: "NOPE"}); status.Code(err) != codes.NotFound {
 		t.Errorf("unknown: %v", err)
@@ -309,10 +236,47 @@ func TestGetDividends_Errors(t *testing.T) {
 			t.Errorf("source down: %v", err)
 		}
 	}
-	if src.calls != 2 {
-		t.Errorf("errors must not be cached, calls = %d", src.calls)
+	if store.dividendReads != 2 {
+		t.Errorf("database reads = %d", store.dividendReads)
 	}
 	if _, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("empty: %v", err)
+	}
+}
+
+func TestGetSecurityInfoReflectsDatabaseUpdates(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, metadata: storage.SecurityMetadata{Issuer: "Old"}}
+	s := newTestServer(store)
+	req := &securitiesreaderpb.GetSecurityInfoRequest{Secid: "SBER"}
+	first, err := s.GetSecurityInfo(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.metadata.Issuer = "New"
+	second, err := s.GetSecurityInfo(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Fields[0].Value != "Old" || second.Fields[0].Value != "New" {
+		t.Fatalf("first=%v second=%v", first, second)
+	}
+}
+
+func TestGetDividendsLoadedEmptySnapshot(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, dividendsLoaded: true}
+	resp, err := newTestServer(store).GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: "SBER"})
+	if err != nil || len(resp.GetDividends()) != 0 {
+		t.Fatalf("resp=%v err=%v", resp, err)
+	}
+}
+
+func TestStoredMetadataDatabaseErrors(t *testing.T) {
+	store := &fakeStore{boards: map[string][]string{"SBER": {"TQBR"}}, metadataErr: errors.New("database down"), dividendsErr: errors.New("database down")}
+	s := newTestServer(store)
+	if _, err := s.GetSecurityInfo(context.Background(), &securitiesreaderpb.GetSecurityInfoRequest{Secid: "SBER"}); status.Code(err) != codes.Internal {
+		t.Fatalf("info err=%v", err)
+	}
+	if _, err := s.GetDividends(context.Background(), &securitiesreaderpb.GetDividendsRequest{Secid: "SBER"}); status.Code(err) != codes.Internal {
+		t.Fatalf("dividends err=%v", err)
 	}
 }

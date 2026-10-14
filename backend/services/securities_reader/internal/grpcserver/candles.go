@@ -2,7 +2,6 @@ package grpcserver
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -85,23 +84,26 @@ func (s *Server) loadCandles(ctx context.Context, secid, board string, r securit
 
 	switch r {
 	case securitiesreaderpb.CandleRange_CANDLE_RANGE_DAY:
-		if s.Moex != nil {
-			c, err := s.intradayCandles(ctx, secid, board)
-			if err == nil && len(c) > 0 {
-				return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES, nil
-			}
-			if err != nil {
-				s.Log.Warn("moex intraday candles unavailable, falling back to hourly", "secid", secid, "board", board, "error", err)
-			}
+		latest, ok, err := s.Store.LatestCandleStart(ctx, secid, board, storage.IntervalTenMinutes)
+		interval := storage.IntervalTenMinutes
+		pbInterval := securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_TEN_MINUTES
+		if err != nil {
+			return nil, pbInterval, err
 		}
-		latest, ok, err := s.Store.LatestCandleStart(ctx, secid, board, storage.IntervalHour)
-		if err != nil || !ok {
-			return nil, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR, err
+		hourly, hasHourly, err := s.Store.LatestCandleStart(ctx, secid, board, storage.IntervalHour)
+		if err != nil {
+			return nil, pbInterval, err
 		}
-		l := latest.In(loc)
-		dayStart := time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, loc)
-		c, err := s.Store.Candles(ctx, secid, board, storage.IntervalHour, dayStart)
-		return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR, err
+		if !ok || (hasHourly && startOfDay(hourly, loc).After(startOfDay(latest, loc))) {
+			interval = storage.IntervalHour
+			pbInterval = securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_HOUR
+			latest, ok = hourly, hasHourly
+		}
+		if !ok {
+			return nil, pbInterval, nil
+		}
+		c, err := s.Store.Candles(ctx, secid, board, interval, startOfDay(latest, loc))
+		return c, pbInterval, err
 
 	case securitiesreaderpb.CandleRange_CANDLE_RANGE_WEEK:
 		return s.dailyCandles(ctx, secid, board, startOfDay(now.AddDate(0, 0, -7), loc))
@@ -113,18 +115,15 @@ func (s *Server) loadCandles(ctx context.Context, secid, board string, r securit
 		return s.dailyCandles(ctx, secid, board, startOfDay(now.AddDate(-1, 0, 0), loc))
 
 	case securitiesreaderpb.CandleRange_CANDLE_RANGE_FIVE_YEARS:
-		if s.Moex != nil {
-			s.caches()
-			c, err := s.moexCandles(ctx, s.longRange, secid, board, 7, startOfDay(now.AddDate(-5, 0, 0), loc))
-			if err == nil && len(c) > 0 {
-				return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK, nil
-			}
-			if err != nil {
-				s.Log.Warn("moex weekly candles unavailable, falling back to stored history", "secid", secid, "board", board, "error", err)
+		c, err := s.Store.WeeklyCandles(ctx, secid, board)
+		from := startOfDay(now.AddDate(-5, 0, 0), loc)
+		filtered := make([]storage.Candle, 0, len(c))
+		for _, candle := range c {
+			if !candle.Start.Before(from) {
+				filtered = append(filtered, candle)
 			}
 		}
-		c, err := s.Store.WeeklyCandles(ctx, secid, board)
-		return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK, err
+		return filtered, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_WEEK, err
 
 	default:
 		c, err := s.Store.WeeklyCandles(ctx, secid, board)
@@ -132,68 +131,9 @@ func (s *Server) loadCandles(ctx context.Context, secid, board string, r securit
 	}
 }
 
-func (s *Server) intradayCandles(ctx context.Context, secid, board string) ([]storage.Candle, error) {
-	s.caches()
-	loc := s.loc()
-	day := s.now()
-	latest, ok, err := s.Store.LatestCandleStart(ctx, secid, board, storage.IntervalDay)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		day = latest
-	}
-	date := day.In(loc).Format("2006-01-02")
-	key := secid + "|" + board + "|" + date
-	if c, ok := s.intraday.get(key, s.now()); ok {
-		return c, nil
-	}
-
-	raw, err := s.Moex.IntradayCandles(ctx, secid, board, day, loc)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]storage.Candle, 0, len(raw))
-	for _, c := range raw {
-		out = append(out, storage.Candle{Start: c.Begin, Open: c.Open, High: c.High, Low: c.Low, Close: c.Close})
-	}
-	s.intraday.put(key, out, s.now())
-	return out, nil
-}
-
 func (s *Server) dailyCandles(ctx context.Context, secid, board string, from time.Time) ([]storage.Candle, securitiesreaderpb.CandleInterval, error) {
-	if s.Moex != nil {
-		s.caches()
-		c, err := s.moexCandles(ctx, s.daily, secid, board, 24, from)
-		if err == nil && len(c) > 0 {
-			return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY, nil
-		}
-		if err != nil {
-			s.Log.Warn("moex daily candles unavailable, falling back to stored history", "secid", secid, "board", board, "error", err)
-		}
-	}
 	c, err := s.Store.Candles(ctx, secid, board, storage.IntervalDay, from)
 	return c, securitiesreaderpb.CandleInterval_CANDLE_INTERVAL_DAY, err
-}
-
-func (s *Server) moexCandles(ctx context.Context, cache *ttlCache[[]storage.Candle], secid, board string, interval int, from time.Time) ([]storage.Candle, error) {
-	s.caches()
-	loc := s.loc()
-	now := s.now()
-	key := fmt.Sprintf("%s|%s|%d|%s", secid, board, interval, from.In(loc).Format("2006-01-02"))
-	if c, ok := cache.get(key, now); ok {
-		return c, nil
-	}
-	raw, err := s.Moex.Candles(ctx, secid, board, interval, from, now, loc)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]storage.Candle, 0, len(raw))
-	for _, c := range raw {
-		out = append(out, storage.Candle{Start: c.Begin, Open: c.Open, High: c.High, Low: c.Low, Close: c.Close})
-	}
-	cache.put(key, out, now)
-	return out, nil
 }
 
 func startOfDay(t time.Time, loc *time.Location) time.Time {

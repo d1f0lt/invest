@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"invest/backend/services/securities_reader/internal/moex"
+	"invest/backend/services/securities_reader/internal/storage"
 	securitiesreaderpb "invest/backend/services/securities_reader/proto"
 )
 
@@ -49,12 +49,6 @@ func (s *Server) GetSecurityInfo(ctx context.Context, req *securitiesreaderpb.Ge
 		return nil, err
 	}
 
-	s.caches()
-	key := secid + "|" + board
-	if cached, ok := s.info.get(key, s.now()); ok {
-		return cached, nil
-	}
-
 	ref, _, err := s.Store.SecurityRef(ctx, secid, board)
 	if err != nil {
 		s.Log.Error("failed to load security", "secid", secid, "board", board, "error", err)
@@ -72,25 +66,17 @@ func (s *Server) GetSecurityInfo(ctx context.Context, req *securitiesreaderpb.Ge
 		values["LOTSIZE"] = strconv.FormatInt(*ref.LotSize, 10)
 	}
 
-	var issuer string
-	complete := s.Moex != nil
-	if s.Moex != nil {
-		desc, err := s.Moex.Description(ctx, secid)
-		if err != nil {
-			complete = false
-			s.Log.Warn("moex description unavailable", "secid", secid, "error", err)
-		}
-		for _, f := range desc {
-			if f.Value != "" {
-				values[strings.ToUpper(f.Name)] = f.Value
-			}
-		}
-		issuer, err = s.Moex.EmitterTitle(ctx, secid)
-		if err != nil {
-			complete = false
-			s.Log.Warn("moex issuer unavailable", "secid", secid, "error", err)
+	metadata, err := s.Store.SecurityMetadata(ctx, secid)
+	if err != nil {
+		s.Log.Error("failed to load security metadata", "secid", secid, "error", err)
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	for name, value := range metadata.Values {
+		if value != "" {
+			values[strings.ToUpper(name)] = value
 		}
 	}
+	issuer := metadata.Issuer
 
 	resp := &securitiesreaderpb.GetSecurityInfoResponse{Secid: secid, Board: board}
 	if issuer = shortIssuerName(issuer); issuer != "" {
@@ -98,11 +84,8 @@ func (s *Server) GetSecurityInfo(ctx context.Context, req *securitiesreaderpb.Ge
 			Name: "ISSUER", Title: "Эмитент", Value: issuer, Type: "text",
 		})
 	}
-	resp.Fields = append(resp.Fields, buildInfoFields(values, moex.MarketFor(board) == "bonds")...)
+	resp.Fields = append(resp.Fields, buildInfoFields(values, storage.IsBondBoard(board))...)
 
-	if complete {
-		s.info.put(key, resp, s.now())
-	}
 	return resp, nil
 }
 

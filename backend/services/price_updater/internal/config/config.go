@@ -11,7 +11,8 @@ import (
 type Config struct {
 	DatabaseURL string
 
-	MoexISSBaseURL string
+	MoexISSBaseURL   string
+	DividendsBaseURL string
 
 	MoexBoards []string
 
@@ -31,10 +32,11 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		DatabaseURL:    getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/invest?sslmode=disable"),
-		MoexISSBaseURL: getEnv("MOEX_ISS_BASE_URL", "https://iss.moex.com/iss"),
-		MoexBoards:     splitAndTrim(getEnv("MOEX_BOARDS", "TQBR,TQTF,TQOB,TQCB")),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/invest?sslmode=disable"),
+		DividendsBaseURL: getEnv("DIVIDENDS_BASE_URL", "https://www.dohod.ru/ik/analytics/dividend"),
+		MoexISSBaseURL:   getEnv("MOEX_ISS_BASE_URL", "https://iss.moex.com/iss"),
+		MoexBoards:       splitAndTrim(getEnv("MOEX_BOARDS", "TQBR,TQTF,TQOB,TQCB")),
+		LogLevel:         getEnv("LOG_LEVEL", "info"),
 	}
 
 	pollInterval, err := time.ParseDuration(getEnv("POLL_INTERVAL", "1m"))

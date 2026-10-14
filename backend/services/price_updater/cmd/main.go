@@ -11,6 +11,8 @@ import (
 	_ "time/tzdata"
 
 	"invest/backend/services/price_updater/internal/config"
+	"invest/backend/services/price_updater/internal/dohod"
+	"invest/backend/services/price_updater/internal/moex"
 	"invest/backend/services/price_updater/internal/moexclient"
 	"invest/backend/services/price_updater/internal/storage"
 	"invest/backend/services/price_updater/internal/updater"
@@ -64,10 +66,16 @@ func main() {
 		RequestPause: cfg.HistoryRequestPause,
 	}, log)
 
+	intraday := &updater.IntradayJob{Client: client, Store: store, Boards: cfg.MoexBoards, Loc: moscow, Log: log, RequestPause: cfg.HistoryRequestPause}
+
+	metadata := &updater.MetadataJob{Client: moex.New(cfg.MoexISSBaseURL, cfg.HTTPTimeout), Dividends: dohod.New(cfg.DividendsBaseURL, cfg.HTTPTimeout), Store: store, Boards: cfg.MoexBoards, Log: log, RequestPause: cfg.HistoryRequestPause}
+
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(4)
 	go func() { defer wg.Done(); u.Run(ctx, cfg.PollInterval) }()
 	go func() { defer wg.Done(); h.Run(ctx) }()
+	go func() { defer wg.Done(); intraday.Run(ctx, cfg.PollInterval) }()
+	go func() { defer wg.Done(); metadata.Run(ctx) }()
 	wg.Wait()
 
 	log.Info("price_updater stopped")

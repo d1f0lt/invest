@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-const pageSize = 500
-
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -23,14 +21,6 @@ func New(baseURL string, timeout time.Duration) *Client {
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{Timeout: timeout},
 	}
-}
-
-type Candle struct {
-	Begin time.Time
-	Open  float64
-	High  float64
-	Low   float64
-	Close float64
 }
 
 type DescriptionField struct {
@@ -63,65 +53,6 @@ func MarketFor(board string) string {
 	return "shares"
 }
 
-func (c *Client) IntradayCandles(ctx context.Context, secid, board string, day time.Time, loc *time.Location) ([]Candle, error) {
-	return c.Candles(ctx, secid, board, 10, day, day, loc)
-}
-
-func (c *Client) Candles(ctx context.Context, secid, board string, interval int, from, till time.Time, loc *time.Location) ([]Candle, error) {
-	path := fmt.Sprintf("/engines/stock/markets/%s/boards/%s/securities/%s/candles.json",
-		MarketFor(board), url.PathEscape(board), url.PathEscape(secid))
-
-	var out []Candle
-	for start := 0; ; start += pageSize {
-		q := url.Values{}
-		q.Set("iss.meta", "off")
-		q.Set("interval", strconv.Itoa(interval))
-		q.Set("from", from.In(loc).Format("2006-01-02"))
-		q.Set("till", till.In(loc).Format("2006-01-02"))
-		q.Set("start", strconv.Itoa(start))
-
-		var resp struct {
-			Candles issTable `json:"candles"`
-		}
-		if err := c.getJSON(ctx, path, q, &resp); err != nil {
-			return nil, err
-		}
-		page, err := parseCandles(resp.Candles, loc)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, page...)
-		if len(resp.Candles.Data) < pageSize || start >= 10*pageSize {
-			return out, nil
-		}
-	}
-}
-
-func parseCandles(t issTable, loc *time.Location) ([]Candle, error) {
-	idx := columnIndex(t.Columns)
-	for _, col := range []string{"open", "close", "high", "low", "begin"} {
-		if _, ok := idx[col]; !ok {
-			return nil, fmt.Errorf("moex candles: column %q missing", col)
-		}
-	}
-	out := make([]Candle, 0, len(t.Data))
-	for _, row := range t.Data {
-		begin, err := time.ParseInLocation("2006-01-02 15:04:05", cellString(row, pos(idx, "begin")), loc)
-		if err != nil {
-			return nil, fmt.Errorf("moex candles: bad begin: %w", err)
-		}
-		open, ok1 := cellFloat(row, pos(idx, "open"))
-		high, ok2 := cellFloat(row, pos(idx, "high"))
-		low, ok3 := cellFloat(row, pos(idx, "low"))
-		cls, ok4 := cellFloat(row, pos(idx, "close"))
-		if !ok1 || !ok2 || !ok3 || !ok4 {
-			continue
-		}
-		out = append(out, Candle{Begin: begin, Open: open, High: high, Low: low, Close: cls})
-	}
-	return out, nil
-}
-
 func (c *Client) Description(ctx context.Context, secid string) ([]DescriptionField, error) {
 	q := url.Values{}
 	q.Set("iss.meta", "off")
@@ -131,6 +62,12 @@ func (c *Client) Description(ctx context.Context, secid string) ([]DescriptionFi
 	}
 	if err := c.getJSON(ctx, "/securities/"+url.PathEscape(secid)+".json", q, &resp); err != nil {
 		return nil, err
+	}
+	idx := columnIndex(resp.Description.Columns)
+	for _, column := range []string{"name", "value"} {
+		if _, ok := idx[column]; !ok {
+			return nil, fmt.Errorf("moex description: missing column %s", column)
+		}
 	}
 	return parseDescription(resp.Description), nil
 }

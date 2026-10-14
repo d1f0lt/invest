@@ -23,11 +23,11 @@ service SecuritiesReaderService {
   rpc SearchSecurities(SearchSecuritiesRequest) returns (SearchSecuritiesResponse);
   // Reference data for the "about" section of the asset card: issuer,
   // full name, ISIN, lot, face value, issue size, listing level, and for
-  // bonds maturity and coupon. Fetched from MOEX ISS and cached.
+  // bonds maturity and coupon. Read from the database; price_updater loads MOEX data.
   rpc GetSecurityInfo(GetSecurityInfoRequest) returns (GetSecurityInfoResponse);
   // Dividend history by registry close date, newest first, including
-  // announced dividends and forecasts. Source: dohod.ru (MOEX ISS no longer
-  // serves /securities/{secid}/dividends), cached for a day. Bonds -> empty.
+  // announced dividends and forecasts. Read from the database; price_updater
+  // loads dohod.ru. Before the first successful load -> Unavailable. Bonds -> empty.
   rpc GetDividends(GetDividendsRequest) returns (GetDividendsResponse);
 }
 
@@ -62,17 +62,11 @@ message GetPricesResponse {
   repeated PriceView prices = 1;
 }
 
-// Chart period. The server picks the candle size for each:
-//   DAY   - 10-minute candles of the last trading day (today while
-//           trading, otherwise the most recent day with trades), fetched
-//           from MOEX ISS on demand; hourly candles from the database if
-//           MOEX is unavailable
-//   WEEK  - daily candles of the last 7 days
-//   MONTH - daily candles of the last month
-//   YEAR  - daily candles of the last year
-//           (WEEK/MONTH/YEAR come from MOEX ISS on demand, cached for 5
-//           minutes; stored daily candles if MOEX is unavailable)
-//   ALL   - weekly candles over the whole stored history
+// Chart period. All candles are read from the database.
+// DAY uses stored 10-minute candles of the latest trading day, or stored
+// hourly candles until 10-minute candles for the new day are available.
+// WEEK/MONTH/YEAR use stored daily candles. ALL and FIVE_YEARS aggregate
+// daily candles into weeks. Available depth depends on the loaded history.
 enum CandleRange {
   CANDLE_RANGE_UNSPECIFIED = 0;
   CANDLE_RANGE_DAY = 1;
@@ -80,8 +74,7 @@ enum CandleRange {
   CANDLE_RANGE_MONTH = 3;
   CANDLE_RANGE_YEAR = 4;
   CANDLE_RANGE_ALL = 5;
-  // Weekly candles of the last 5 years from MOEX ISS (cached for an hour);
-  // stored weekly history (as ALL) if MOEX is unavailable.
+  // Stored daily candles aggregated into weeks, limited to the last 5 years.
   CANDLE_RANGE_FIVE_YEARS = 6;
 }
 
