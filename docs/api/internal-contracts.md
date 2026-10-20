@@ -12,7 +12,7 @@
 | Пакеты | `invest.<service>.v1` |
 | Источник `.proto` | только у сервиса-владельца: `backend/services/<owner>/proto/*.proto` |
 | Идентификация | metadata `x-user-id: <uuid>` выставляет `gateway` (или `parser` из задачи) |
-| Ошибки | стандартные коды `google.golang.org/grpc/codes`; соответствие HTTP — в [REST API](rest-api.md#общие-правила) |
+| Ошибки | стандартные коды `google.golang.org/grpc/codes`; соответствие HTTP — в [таблице соответствия gRPC и HTTP](../02-architecture.md#обработка-ошибок) |
 | Health | `grpc.health.v1.Health/Check` у каждого gRPC-сервиса |
 | Reflection | включён: `grpcurl -plaintext <host:port> list` |
 | Совместимость | только обратно совместимые изменения: новые поля с новыми номерами, удалённые номера не переиспользуются |

@@ -4,7 +4,7 @@ info:
   version: "1.0.0"
   description: |
     Внешний REST API единственной публичной точки входа `gateway`.
-    Инструкция запуска Swagger UI — rest-api.md в этой же папке.
+    Инструкция запуска Swagger UI — openapi.md в этой же папке.
     Источник истины — backend/services/gateway/internal/httpapi.
 servers:
   - url: https://d1f0lt-invest.duckdns.org:8443
