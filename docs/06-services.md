@@ -125,5 +125,5 @@ total_pnl = realized + unrealized
 | postgres | `postgres:16-alpine` | общая БД `invest` | volume `postgres_data` |
 | s3 | `chrislusf/seaweedfs:4.06` | S3-совместимое хранилище (master + volume + filer + S3 в одном контейнере) | volume `s3_data` |
 | s3-init | `chrislusf/seaweedfs:4.06` | одноразово создаёт бакет `reports` | — |
-| rabbitmq | `rabbitmq:3-management-alpine` | очередь задач, management UI | без volume: durable-очередь и persistent-сообщения переживают рестарт, но не пересоздание контейнера (уточнить, допустимо ли) |
+| rabbitmq | `rabbitmq:3-management-alpine` | очередь задач, management UI | без volume: durable-очередь и persistent-сообщения переживают рестарт, но не пересоздание контейнера |
 | caddy | `caddy:2-alpine` | HTTPS-прокси, только профиль `https` | volumes `caddy_data`, `caddy_config` (сертификаты) |

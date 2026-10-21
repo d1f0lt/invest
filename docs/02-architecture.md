@@ -165,8 +165,8 @@ docker-сети. Подробнее — в [Безопасности](05-securit
 ### Конфигурация
 
 Только переменные окружения (12-factor). Секреты — в `backend/.env`,
-в `docker-compose.yml` их нет. Полный перечень — в
-[Конфигурации](08-configuration.md).
+в `docker-compose.yml` их нет. Переменные для запуска перечислены в
+[шаблоне .env](../backend/.env.example) и в [Docker Compose](../backend/docker-compose.yml).
 
 ### Генерация кода
 
