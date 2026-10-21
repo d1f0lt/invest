@@ -1,5 +1,15 @@
 # invest
 
+Учёт личного инвестиционного портфеля на Московской бирже: мобильное
+приложение на Flutter и микросервисный backend на Go.
+
+| Каталог | Что внутри |
+|---|---|
+| [`backend/`](backend/) | 7 Go-сервисов, `docker-compose.yml`, миграции, скрипты |
+| [`mobile/`](mobile/README.md) | Flutter-приложение (Android, iOS) |
+| [`docs/`](docs/) | техническая документация |
+| `.github/workflows/` | CI/CD |
+
 ## Деплой
 
 Backend выкатывается на сервер тегом `v*`:
@@ -19,7 +29,7 @@ Workflow [`deploy`](.github/workflows/deploy.yml):
 
 **Откат / повторная выкатка:** Actions → deploy → Run workflow → указать уже собранный тег. Образы не пересобираются, миграции не откатываются — поэтому миграция должна работать и со старой версией кода.
 
-**HTTPS:** на сервере перед gateway стоит Caddy (`backend/caddy/Caddyfile`, профиль `https`). Сертификат Let's Encrypt он получает сам через порт 80, HTTPS отдаёт на **8443** — порт 443 на сервере занят VPN. Адрес API: `https://d1f0lt-invest.duckdns.org:8443`. Порт gateway 8080 на сервере слушает только `127.0.0.1`.
+**HTTPS:** на сервере перед gateway стоит Caddy (`backend/caddy/Caddyfile`, профиль `https`). Сертификат Let's Encrypt он получает сам через порт 80, HTTPS отдаёт на **8443**. Адрес API: `https://d1f0lt-invest.duckdns.org:8443`. Порт gateway 8080 на сервере слушает только `127.0.0.1`.
 
 **Секреты** (environment `production`): `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `ENV_FILE` (содержимое `.env` по образцу `backend/.env.example`).
 
