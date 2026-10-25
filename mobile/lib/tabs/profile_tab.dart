@@ -11,6 +11,8 @@ import '../portfolio/portfolio_store.dart';
 import '../profile/change_password_screen.dart';
 import '../profile/delete_account_dialog.dart';
 import '../profile/editable_field.dart';
+import 'calendar_tab.dart';
+import 'notifications_tab.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -63,6 +65,20 @@ class _ProfileTabState extends State<ProfileTab> {
   Future<void> _saveEmail(String value) async {
     final user = await _api.updateMe(email: value);
     if (mounted) setState(() => _user = user);
+  }
+
+  void _openCalendar() {
+    final route = MaterialPageRoute<void>(
+      builder: (_) => const CalendarTab(),
+    );
+    Navigator.of(context).push(route);
+  }
+
+  void _openNotifications() {
+    final route = MaterialPageRoute<void>(
+      builder: (_) => const NotificationsTab(),
+    );
+    Navigator.of(context).push(route);
   }
 
   void _changePassword() {
@@ -188,6 +204,20 @@ class _ProfileTabState extends State<ProfileTab> {
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(16));
     const size = Size.fromHeight(52);
     return [
+      OutlinedButton.icon(
+        onPressed: _openCalendar,
+        icon: const Icon(Icons.calendar_month_outlined),
+        label: const Text('Календарь выплат'),
+        style: OutlinedButton.styleFrom(minimumSize: size, shape: shape),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: _openNotifications,
+        icon: const Icon(Icons.notifications_outlined),
+        label: const Text('Уведомления'),
+        style: OutlinedButton.styleFrom(minimumSize: size, shape: shape),
+      ),
+      const SizedBox(height: 12),
       if (_user != null) ...[
         OutlinedButton.icon(
           onPressed: _changePassword,
