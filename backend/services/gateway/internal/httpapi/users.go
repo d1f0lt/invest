@@ -57,6 +57,7 @@ type userResponse struct {
 	ID        string     `json:"id"`
 	Email     string     `json:"email"`
 	Username  *string    `json:"username,omitempty"`
+	IsAdmin   *bool      `json:"is_admin,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	LastLogin *time.Time `json:"last_login_at,omitempty"`
 }
@@ -66,6 +67,7 @@ func toUserResponse(u *userspb.User) userResponse {
 		ID:        u.GetId(),
 		Email:     u.GetEmail(),
 		Username:  u.Username,
+		IsAdmin:   u.IsAdmin,
 		CreatedAt: u.GetCreatedAt().AsTime(),
 	}
 	if u.LastLoginAt != nil {

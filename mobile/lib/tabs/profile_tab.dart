@@ -11,6 +11,7 @@ import '../portfolio/portfolio_store.dart';
 import '../profile/change_password_screen.dart';
 import '../profile/delete_account_dialog.dart';
 import '../profile/editable_field.dart';
+import '../profile/user_role_label.dart';
 import 'calendar_tab.dart';
 import 'notifications_tab.dart';
 
@@ -163,6 +164,8 @@ class _ProfileTabState extends State<ProfileTab> {
           ),
         ),
       ),
+      const SizedBox(height: 8),
+      Center(child: UserRoleLabel(isAdmin: user.isAdmin)),
       const SizedBox(height: 24),
       Card(
         margin: EdgeInsets.zero,

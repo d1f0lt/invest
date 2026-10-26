@@ -34,17 +34,19 @@ class AuthTokens {
 }
 
 class UserProfile {
-  const UserProfile({required this.id, required this.email, this.username});
+  const UserProfile({required this.id, required this.email, this.username, this.isAdmin});
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
         id: json['id'] as String,
         email: json['email'] as String,
         username: json['username'] as String?,
+        isAdmin: json['is_admin'] as bool?,
       );
 
   final String id;
   final String email;
   final String? username;
+  final bool? isAdmin;
 }
 
 /// Запросы к публичным маршрутам gateway: регистрация, вход, выход.

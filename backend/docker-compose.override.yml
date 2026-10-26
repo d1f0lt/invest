@@ -1,0 +1,5 @@
+services:
+  users:
+    environment:
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD-admin}
+      ALLOW_LOCAL_ADMIN_PASSWORD: "true"

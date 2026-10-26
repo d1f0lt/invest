@@ -360,6 +360,7 @@ func toUserPB(u storage.User) *userspb.User {
 		Id:        u.ID,
 		Email:     u.Email,
 		Username:  u.Username,
+		IsAdmin:   &u.IsAdmin,
 		CreatedAt: timestamppb.New(u.CreatedAt),
 	}
 	if u.LastLoginAt != nil {

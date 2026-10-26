@@ -121,6 +121,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
       GRPC_ADDR: ":8082"
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       # Issued on login here, verified by gateway (the only service that
       # checks a JWT signature - see architecture-decisions.md and
       # services/gateway/README.md). Kept required so `docker
@@ -375,7 +376,7 @@ services:
     # GATEWAY_BIND=127.0.0.1 on the server: the public entry point there is
     # caddy (HTTPS) below, and Docker publishes ports past ufw.
     ports:
-      - "${GATEWAY_BIND:-0.0.0.0}:8080:8080"
+      - "${GATEWAY_BIND:-127.0.0.1}:8080:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 10s

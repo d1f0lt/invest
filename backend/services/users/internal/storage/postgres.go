@@ -25,6 +25,7 @@ type User struct {
 	Username     *string
 	PasswordHash string
 	IsActive     bool
+	IsAdmin      bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	LastLoginAt  *time.Time
@@ -75,12 +76,12 @@ func (s *Store) CreateUser(ctx context.Context, email string, username *string, 
 	const stmt = `
 		INSERT INTO users (email, username, password_hash)
 		VALUES ($1, $2, $3)
-		RETURNING id, email, username, is_active, created_at, updated_at, last_login_at
+		RETURNING id, email, username, is_active, is_admin, created_at, updated_at, last_login_at
 	`
 
 	var u User
 	err := s.db.QueryRowContext(ctx, stmt, email, username, passwordHash).Scan(
-		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if err != nil {
 		if uerr := uniqueViolation(err); uerr != nil {
@@ -104,12 +105,12 @@ func uniqueViolation(err error) error {
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	const stmt = `
-		SELECT id, email, username, is_active, created_at, updated_at, last_login_at
+		SELECT id, email, username, is_active, is_admin, created_at, updated_at, last_login_at
 		FROM users WHERE id = $1
 	`
 	var u User
 	err := s.db.QueryRowContext(ctx, stmt, id).Scan(
-		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -122,12 +123,12 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 
 func (s *Store) GetUserByEmailWithPassword(ctx context.Context, email string) (User, error) {
 	const stmt = `
-		SELECT id, email, username, password_hash, is_active, created_at, updated_at, last_login_at
-		FROM users WHERE LOWER(email) = LOWER($1)
+		SELECT id, email, username, password_hash, is_active, is_admin, created_at, updated_at, last_login_at
+		FROM users WHERE lower(email) = lower($1) OR ($1 = 'admin' AND is_admin AND lower(username) = 'admin')
 	`
 	var u User
 	err := s.db.QueryRowContext(ctx, stmt, email).Scan(
-		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -140,12 +141,12 @@ func (s *Store) GetUserByEmailWithPassword(ctx context.Context, email string) (U
 
 func (s *Store) GetUserByIDWithPassword(ctx context.Context, id string) (User, error) {
 	const stmt = `
-		SELECT id, email, username, password_hash, is_active, created_at, updated_at, last_login_at
+		SELECT id, email, username, password_hash, is_active, is_admin, created_at, updated_at, last_login_at
 		FROM users WHERE id = $1
 	`
 	var u User
 	err := s.db.QueryRowContext(ctx, stmt, id).Scan(
-		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -160,11 +161,11 @@ func (s *Store) UpdateProfile(ctx context.Context, id, email string, username *s
 	const stmt = `
 		UPDATE users SET email = $2, username = $3, updated_at = now()
 		WHERE id = $1
-		RETURNING id, email, username, is_active, created_at, updated_at, last_login_at
+		RETURNING id, email, username, is_active, is_admin, created_at, updated_at, last_login_at
 	`
 	var u User
 	err := s.db.QueryRowContext(ctx, stmt, id, email, username).Scan(
-		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.ID, &u.Email, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound

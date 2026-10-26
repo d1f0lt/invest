@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
+	"invest/backend/services/users/internal/auth"
 	"invest/backend/services/users/internal/cleanup"
 	"invest/backend/services/users/internal/config"
 	"invest/backend/services/users/internal/grpcserver"
@@ -51,6 +52,23 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+
+	if password := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"); password != "" {
+		if len(password) < 8 && !(password == "admin" && os.Getenv("ALLOW_LOCAL_ADMIN_PASSWORD") == "true") {
+			log.Error("bootstrap administrator password must be at least eight bytes")
+			os.Exit(1)
+		}
+		hash, err := auth.HashPassword(password, cfg.BcryptCost)
+		if err == nil {
+			seedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err = store.BootstrapAdmin(seedCtx, hash)
+			cancel()
+		}
+		if err != nil {
+			log.Error("failed to create bootstrap administrator", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
