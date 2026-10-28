@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	feedpb "invest/backend/services/gateway/internal/feedpb"
 	notifierpb "invest/backend/services/gateway/internal/notifierpb"
 	portfoliopb "invest/backend/services/gateway/internal/portfoliopb"
 	securitiesreaderpb "invest/backend/services/gateway/internal/securitiesreaderpb"
@@ -19,16 +20,19 @@ type Clients struct {
 	Portfolio        portfoliopb.PortfolioServiceClient
 	SecuritiesReader securitiesreaderpb.SecuritiesReaderServiceClient
 	Notifier         notifierpb.NotifierServiceClient
+	Feed             feedpb.FeedServiceClient
 
 	usersConn            *grpc.ClientConn
 	portfolioConn        *grpc.ClientConn
 	securitiesReaderConn *grpc.ClientConn
 	notifierConn         *grpc.ClientConn
+	feedConn             *grpc.ClientConn
 
 	usersHealth            grpc_health_v1.HealthClient
 	portfolioHealth        grpc_health_v1.HealthClient
 	securitiesReaderHealth grpc_health_v1.HealthClient
 	notifierHealth         grpc_health_v1.HealthClient
+	feedHealth             grpc_health_v1.HealthClient
 }
 
 type Addrs struct {
@@ -36,6 +40,7 @@ type Addrs struct {
 	Portfolio        string
 	SecuritiesReader string
 	Notifier         string
+	Feed             string
 }
 
 func Dial(addrs Addrs) (*Clients, error) {
@@ -62,21 +67,33 @@ func Dial(addrs Addrs) (*Clients, error) {
 		return nil, fmt.Errorf("dial notifier service: %w", err)
 	}
 
+	feedConn, err := grpc.NewClient(addrs.Feed, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		usersConn.Close()
+		portfolioConn.Close()
+		securitiesReaderConn.Close()
+		notifierConn.Close()
+		return nil, fmt.Errorf("dial feed service: %w", err)
+	}
+
 	return &Clients{
 		Users:            userspb.NewUsersServiceClient(usersConn),
 		Portfolio:        portfoliopb.NewPortfolioServiceClient(portfolioConn),
 		SecuritiesReader: securitiesreaderpb.NewSecuritiesReaderServiceClient(securitiesReaderConn),
 		Notifier:         notifierpb.NewNotifierServiceClient(notifierConn),
+		Feed:             feedpb.NewFeedServiceClient(feedConn),
 
 		usersConn:            usersConn,
 		portfolioConn:        portfolioConn,
 		securitiesReaderConn: securitiesReaderConn,
 		notifierConn:         notifierConn,
+		feedConn:             feedConn,
 
 		usersHealth:            grpc_health_v1.NewHealthClient(usersConn),
 		portfolioHealth:        grpc_health_v1.NewHealthClient(portfolioConn),
 		securitiesReaderHealth: grpc_health_v1.NewHealthClient(securitiesReaderConn),
 		notifierHealth:         grpc_health_v1.NewHealthClient(notifierConn),
+		feedHealth:             grpc_health_v1.NewHealthClient(feedConn),
 	}, nil
 }
 
@@ -85,6 +102,7 @@ func (c *Clients) Close() {
 	c.portfolioConn.Close()
 	c.securitiesReaderConn.Close()
 	c.notifierConn.Close()
+	c.feedConn.Close()
 }
 
 type HealthReport map[string]string
@@ -96,6 +114,7 @@ func (c *Clients) CheckAll(ctx context.Context) HealthReport {
 		"portfolio":         c.portfolioHealth,
 		"securities_reader": c.securitiesReaderHealth,
 		"notifier":          c.notifierHealth,
+		"feed":              c.feedHealth,
 	} {
 		if err := checkOne(ctx, client); err != nil {
 			problems[name] = err.Error()

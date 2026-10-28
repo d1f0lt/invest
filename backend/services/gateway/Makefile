@@ -2,9 +2,10 @@ USERS_SRC := ../users/proto/users.proto
 PORTFOLIO_SRC := ../portfolio/proto/portfolio.proto
 SECURITIESREADER_SRC := ../securities_reader/proto/securitiesreader.proto
 NOTIFIER_SRC := ../notifier/proto/notifier.proto
+FEED_SRC := ../feed/proto/feed.proto
 
 .PHONY: proto
-proto: proto-users proto-portfolio proto-securitiesreader proto-notifier
+proto: proto-users proto-portfolio proto-securitiesreader proto-notifier proto-feed
 
 .PHONY: proto-users
 proto-users:
@@ -47,7 +48,7 @@ proto-notifier:
 	rm internal/notifierpb/notifier.proto
 
 .PHONY: clean
-clean: clean-users clean-portfolio clean-securitiesreader clean-notifier
+clean: clean-users clean-portfolio clean-securitiesreader clean-notifier clean-feed
 
 .PHONY: clean-users
 clean-users:
@@ -64,3 +65,17 @@ clean-securitiesreader:
 .PHONY: clean-notifier
 clean-notifier:
 	rm -rf internal/notifierpb
+
+.PHONY: proto-feed
+proto-feed:
+	mkdir -p internal/feedpb
+	cp $(FEED_SRC) internal/feedpb/feed.proto
+	protoc -I internal/feedpb \
+		--go_out=internal/feedpb --go_opt=paths=source_relative \
+		--go-grpc_out=internal/feedpb --go-grpc_opt=paths=source_relative \
+		internal/feedpb/feed.proto
+	rm internal/feedpb/feed.proto
+
+.PHONY: clean-feed
+clean-feed:
+	rm -rf internal/feedpb

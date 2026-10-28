@@ -16,6 +16,7 @@ type Config struct {
 	PortfolioGRPCAddr        string
 	SecuritiesReaderGRPCAddr string
 	NotifierGRPCAddr         string
+	FeedGRPCAddr             string
 
 	UpstreamTimeout time.Duration
 
@@ -41,6 +42,7 @@ func Load() (Config, error) {
 		PortfolioGRPCAddr:        getEnv("PORTFOLIO_GRPC_ADDR", "localhost:8083"),
 		SecuritiesReaderGRPCAddr: getEnv("SECURITIES_READER_GRPC_ADDR", "localhost:8081"),
 		NotifierGRPCAddr:         getEnv("NOTIFIER_GRPC_ADDR", "localhost:8085"),
+		FeedGRPCAddr:             getEnv("FEED_GRPC_ADDR", "localhost:8086"),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "report.uploaded"),
 		S3Endpoint:               getEnv("S3_ENDPOINT", "localhost:9000"),

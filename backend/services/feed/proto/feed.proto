@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package invest.feed.v1;
+
+option go_package = "invest/backend/services/feed/proto;feedpb";
+
+import "google/protobuf/timestamp.proto";
+
+service FeedService {
+  rpc CreatePost(CreatePostRequest) returns (CreatePostResponse);
+  rpc UpdatePost(UpdatePostRequest) returns (Post);
+  rpc ListPosts(ListPostsRequest) returns (ListPostsResponse);
+  rpc GetDiscussion(GetDiscussionRequest) returns (GetDiscussionResponse);
+  rpc CreateComment(CreateCommentRequest) returns (Comment);
+  rpc SetReaction(SetReactionRequest) returns (Reactions);
+  rpc ModeratePost(ModeratePostRequest) returns (ModeratePostResponse);
+}
+
+message CreatePostRequest {
+  string kind = 1;
+  string title = 2;
+  string body = 3;
+  repeated string tickers = 4;
+  string board = 5;
+  optional double change_percent = 6;
+  string recommendation = 7;
+  string target_date = 8;
+}
+
+message UpdatePostRequest {
+  int64 post_id = 1;
+  CreatePostRequest draft = 2;
+}
+
+message CreatePostResponse {
+  int64 id = 1;
+}
+
+message ListPostsRequest {
+  string kind = 1;
+  string news_status = 2;
+  repeated string tickers = 3;
+  string min_rating = 4;
+  string min_news_rating = 5;
+  string min_forecast_rating = 6;
+  string before = 7;
+  string before_at = 8;
+}
+
+message Post {
+  int64 id = 1;
+  string kind = 2;
+  string title = 3;
+  string body = 4;
+  repeated string tickers = 5;
+  string author = 6;
+  google.protobuf.Timestamp created_at = 7;
+  bool verified = 8;
+  optional int32 rating = 9;
+  int32 rating_samples = 10;
+  string board = 11;
+  optional double change_percent = 12;
+  string recommendation = 13;
+  string target_date = 14;
+  optional bool author_is_admin = 15;
+}
+
+message ListPostsResponse {
+  repeated Post posts = 1;
+  optional int64 next = 2;
+  google.protobuf.Timestamp next_at = 3;
+}
+
+message GetDiscussionRequest {
+  int64 post_id = 1;
+  int64 before = 2;
+}
+
+message GetDiscussionResponse {
+  repeated Comment comments = 1;
+  optional int64 next = 2;
+  Reactions reactions = 3;
+  bool can_moderate = 4;
+  bool verified = 5;
+  bool can_delete_post = 6;
+}
+
+message CreateCommentRequest {
+  int64 post_id = 1;
+  string body = 2;
+}
+
+message Comment {
+  int64 id = 1;
+  string author = 2;
+  string body = 3;
+  google.protobuf.Timestamp created_at = 4;
+  optional bool author_is_admin = 5;
+  bool can_delete = 6;
+}
+
+message SetReactionRequest {
+  int64 post_id = 1;
+  int32 value = 2;
+}
+
+message Reactions {
+  int64 likes = 1;
+  int64 dislikes = 2;
+  int32 mine = 3;
+}
+
+message ModeratePostRequest {
+  int64 post_id = 1;
+  string action = 2;
+  int64 comment_id = 3;
+}
+
+message ModeratePostResponse {}

@@ -2,12 +2,13 @@ FROM golang:1.24-alpine3.22 AS build
 
 # *.pb.go не хранятся в git - генерируются здесь (make proto) из .proto
 # сервисов-владельцев. Они приходят именованными build-контекстами
-# users_proto / portfolio_proto / securitiesreader_proto / notifier_proto (docker-compose.yml:
+# users_proto / portfolio_proto / securitiesreader_proto / notifier_proto / feed_proto (docker-compose.yml:
 # build.additional_contexts), т.к. лежат вне контекста gateway. Без compose:
 #   docker build --build-context users_proto=../users/proto \
 #     --build-context portfolio_proto=../portfolio/proto \
 #     --build-context securitiesreader_proto=../securities_reader/proto \
-#     --build-context notifier_proto=../notifier/proto .
+#     --build-context notifier_proto=../notifier/proto \
+#     --build-context feed_proto=../feed/proto .
 RUN apk add --no-cache make protoc protobuf-dev
 ARG PROTOC_GEN_GO_VERSION=v1.36.5
 ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
@@ -22,11 +23,13 @@ COPY --from=users_proto users.proto /proto/users.proto
 COPY --from=portfolio_proto portfolio.proto /proto/portfolio.proto
 COPY --from=securitiesreader_proto securitiesreader.proto /proto/securitiesreader.proto
 COPY --from=notifier_proto notifier.proto /proto/notifier.proto
+COPY --from=feed_proto feed.proto /proto/feed.proto
 RUN make clean proto \
     USERS_SRC=/proto/users.proto \
     PORTFOLIO_SRC=/proto/portfolio.proto \
     SECURITIESREADER_SRC=/proto/securitiesreader.proto \
-    NOTIFIER_SRC=/proto/notifier.proto
+    NOTIFIER_SRC=/proto/notifier.proto \
+    FEED_SRC=/proto/feed.proto
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/gateway ./cmd
 

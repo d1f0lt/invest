@@ -51,6 +51,14 @@ func NewMux(h *Handlers) http.Handler {
 	mux.HandleFunc("POST /api/v1/me/password", h.requireAuth(h.handleChangePassword))
 	mux.HandleFunc("GET /api/v1/users/{id}", h.requireAuth(h.handleGetUser))
 
+	mux.HandleFunc("GET /api/v1/feed", h.requireAuth(h.handleListFeedPosts))
+	mux.HandleFunc("POST /api/v1/feed", h.requireAuth(h.handleCreateFeedPost))
+	mux.HandleFunc("PATCH /api/v1/feed/{id}", h.requireAuth(h.handleUpdateFeedPost))
+	mux.HandleFunc("GET /api/v1/feed/{id}/discussion", h.requireAuth(h.handleGetDiscussion))
+	mux.HandleFunc("POST /api/v1/feed/{id}/comments", h.requireAuth(h.handleCreateComment))
+	mux.HandleFunc("PUT /api/v1/feed/{id}/reaction", h.requireAuth(h.handleSetReaction))
+	mux.HandleFunc("POST /api/v1/feed/{id}/moderation", h.requireAuth(h.handleModeratePost))
+
 	mux.HandleFunc("GET /api/v1/prices", h.requireAuth(h.handleGetPrices))
 	mux.HandleFunc("GET /api/v1/prices/{secid}/candles", h.requireAuth(h.handleGetCandles))
 	mux.HandleFunc("GET /api/v1/securities", h.requireAuth(h.handleSearchSecurities))

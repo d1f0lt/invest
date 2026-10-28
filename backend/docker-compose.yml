@@ -44,6 +44,7 @@ services:
       - ./services/users/migrations:/docker-entrypoint-initdb.d/migrations/20_users:ro
       - ./services/portfolio/migrations:/docker-entrypoint-initdb.d/migrations/30_portfolio:ro
       - ./services/notifier/migrations:/docker-entrypoint-initdb.d/migrations/40_notifier:ro
+      - ./services/feed/migrations:/docker-entrypoint-initdb.d/migrations/50_feed:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -328,6 +329,19 @@ services:
   # securities_reader became gRPC, hence USERS_GRPC_ADDR etc. below (bare
   # host:port, no http:// scheme) replacing *_BASE_URL, and the
   # healthcheck staying wget-based.
+
+  feed:
+    image: ghcr.io/d1f0lt/invest/feed:${IMAGE_TAG:-latest}
+    build:
+      context: ./services/feed
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/invest?sslmode=disable
+      GRPC_ADDR: :8086
+
   gateway:
     image: ghcr.io/d1f0lt/invest/gateway:${IMAGE_TAG:-latest}
     # The image generates its gRPC code from the owners' .proto files (see
@@ -340,6 +354,7 @@ services:
         portfolio_proto: ./services/portfolio/proto
         securitiesreader_proto: ./services/securities_reader/proto
         notifier_proto: ./services/notifier/proto
+        feed_proto: ./services/feed/proto
     restart: unless-stopped
     depends_on:
       users:
@@ -349,6 +364,8 @@ services:
       securities_reader:
         condition: service_healthy
       notifier:
+        condition: service_healthy
+      feed:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -363,6 +380,7 @@ services:
       PORTFOLIO_GRPC_ADDR: portfolio:8083
       SECURITIES_READER_GRPC_ADDR: securities_reader:8081
       NOTIFIER_GRPC_ADDR: notifier:8085
+      FEED_GRPC_ADDR: feed:8086
       UPSTREAM_TIMEOUT: 15s
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       RABBITMQ_QUEUE: report.uploaded

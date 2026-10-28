@@ -37,6 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - feed
           - gateway
           - notifier
           - parser
@@ -130,6 +131,7 @@ jobs:
           ln -s "$PWD/services/users/migrations" "$root/20_users"
           ln -s "$PWD/services/portfolio/migrations" "$root/30_portfolio"
           ln -s "$PWD/services/notifier/migrations" "$root/40_notifier"
+          ln -s "$PWD/services/feed/migrations" "$root/50_feed"
           MIGRATIONS_ROOT="$root" sh scripts/run-migrations.sh
 
       - uses: actions/setup-go@v5
@@ -151,6 +153,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - feed
           - gateway
           - notifier
           - parser
