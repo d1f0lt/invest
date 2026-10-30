@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'feed/feed_tab.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/portfolio_tab.dart';
 import 'tabs/profile_tab.dart';
@@ -13,6 +14,8 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
+  static const _feedIndex = 2;
+
   int _index = 0;
 
   @override
@@ -24,6 +27,7 @@ class _MainShellState extends State<MainShell> {
         children: [
           const HomeTab(),
           const PortfolioTab(),
+          FeedTab(active: _index == _feedIndex),
           const ProfileTab(),
         ],
       ),
@@ -52,6 +56,11 @@ class _MainShellState extends State<MainShell> {
               icon: Icon(Icons.business_center_outlined),
               selectedIcon: Icon(Icons.business_center_rounded),
               label: 'Портфель',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.dynamic_feed_outlined),
+              selectedIcon: Icon(Icons.dynamic_feed_rounded),
+              label: 'Лента',
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline_rounded),
