@@ -401,6 +401,29 @@ services:
       timeout: 5s
       retries: 5
 
+  assistant:
+    image: ghcr.io/d1f0lt/invest/assistant:${IMAGE_TAG:-latest}
+    build:
+      context: ./services/assistant
+      additional_contexts:
+        portfolio_proto: ./services/portfolio/proto
+        feed_proto: ./services/feed/proto
+    restart: unless-stopped
+    depends_on:
+      portfolio:
+        condition: service_healthy
+      feed:
+        condition: service_healthy
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a root .env file - see .env.example}
+      PORTFOLIO_GRPC_ADDR: portfolio:8083
+      FEED_GRPC_ADDR: feed:8086
+      ASSISTANT_URL: ${ASSISTANT_URL:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
+      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
+    ports:
+      - "${ASSISTANT_BIND:-127.0.0.1}:8087:8087"
+
   # HTTPS in front of gateway, only on the server 
   # served on 8443, not 443: 443 on the server belongs to the VPN (xray).
   caddy:
@@ -410,6 +433,8 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+      assistant:
+        condition: service_healthy
     environment:
       API_DOMAIN: ${API_DOMAIN:-}
     ports:
@@ -417,7 +442,7 @@ services:
       - "8443:8443"
       - "8443:8443/udp"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
 

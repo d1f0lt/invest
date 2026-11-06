@@ -4,5 +4,10 @@
 
 {$API_DOMAIN} {
 	encode gzip
-	reverse_proxy gateway:8080
+	handle /api/v1/assistant/* {
+		reverse_proxy assistant:8087
+	}
+	handle {
+		reverse_proxy gateway:8080
+	}
 }
