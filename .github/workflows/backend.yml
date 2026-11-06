@@ -37,6 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - assistant
           - feed
           - gateway
           - notifier
@@ -153,6 +154,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - assistant
           - feed
           - gateway
           - notifier

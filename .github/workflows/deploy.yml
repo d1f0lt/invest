@@ -38,6 +38,7 @@ jobs:
     strategy:
       matrix:
         service:
+          - assistant
           - feed
           - gateway
           - notifier
