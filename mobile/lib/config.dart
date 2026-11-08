@@ -10,5 +10,14 @@ class AppConfig {
     defaultValue: 'http://localhost:8080',
   );
 
+  static String get assistantBaseUrl {
+    const override = String.fromEnvironment('ASSISTANT_BASE_URL');
+    if (override.isNotEmpty) return override;
+    final base = Uri.parse(apiBaseUrl);
+    return base.scheme == 'http' && base.port == 8080
+        ? base.replace(port: 8087).toString()
+        : apiBaseUrl;
+  }
+
   static const requestTimeout = Duration(seconds: 15);
 }

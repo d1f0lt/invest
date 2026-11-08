@@ -32,8 +32,12 @@ class ApiClient {
   ///
   /// `auth: true` — подставить access-токен из [Session] (обновив его при
   /// необходимости) и при 401 один раз повторить запрос с новым токеном.
-  Future<Object?> post(String path, Map<String, dynamic> body, {bool auth = false}) =>
-      _send('POST', path, body: body, auth: auth);
+  Future<Object?> post(
+    String path,
+    Map<String, dynamic> body, {
+    bool auth = false,
+    Duration timeout = AppConfig.requestTimeout,
+  }) => _send('POST', path, body: body, auth: auth, timeout: timeout);
 
   Future<Object?> put(String path, Map<String, dynamic> body, {bool auth = false}) =>
       _send('PUT', path, body: body, auth: auth);
