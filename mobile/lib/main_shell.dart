@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'assistant/assistant_tab.dart';
 import 'feed/feed_tab.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/portfolio_tab.dart';
@@ -28,6 +29,7 @@ class _MainShellState extends State<MainShell> {
           const HomeTab(),
           const PortfolioTab(),
           FeedTab(active: _index == _feedIndex),
+          const AssistantTab(),
           const ProfileTab(),
         ],
       ),
@@ -61,6 +63,11 @@ class _MainShellState extends State<MainShell> {
               icon: Icon(Icons.dynamic_feed_outlined),
               selectedIcon: Icon(Icons.dynamic_feed_rounded),
               label: 'Лента',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.auto_awesome_outlined),
+              selectedIcon: Icon(Icons.auto_awesome_rounded),
+              label: 'Ассистент',
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline_rounded),
