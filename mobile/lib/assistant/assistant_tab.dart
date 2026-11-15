@@ -6,6 +6,7 @@ import '../config.dart';
 import '../feed/feed_api.dart';
 import '../portfolio/portfolio_picker.dart';
 import '../portfolio/portfolio_store.dart';
+import 'assistant_answer.dart';
 
 class AssistantTab extends StatefulWidget {
   const AssistantTab({super.key});
@@ -230,7 +231,7 @@ class _AssistantTabState extends State<AssistantTab> {
                               children: [
                                 _QuestionBubble(turn.question),
                                 const SizedBox(height: 12),
-                                SelectableText(turn.answer),
+                                AssistantAnswer(turn.answer),
                                 if (turn.sources.isNotEmpty)
                                   _Sources(turn.sources),
                               ],
