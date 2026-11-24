@@ -4,16 +4,17 @@
 
 | Сервис | Тип | Порт (внутри сети) | Хранилища | Вызывает | Вызывается из |
 |---|---|---|---|---|---|
-| [gateway](#gateway) | HTTP API | 8080 | S3, RabbitMQ | users, portfolio, securities_reader, notifier | приложение (через Caddy) |
+| [gateway](#gateway) | HTTP API | 8080 | S3, RabbitMQ | users, portfolio, securities_reader, notifier, feed | приложение (через Caddy) |
 | [users](#users) | gRPC | 8082 | PostgreSQL | — | gateway |
 | [portfolio](#portfolio) | gRPC | 8083 | PostgreSQL | — | gateway, parser |
 | [securities_reader](#securities_reader) | gRPC | 8081 | PostgreSQL (чтение) | — | gateway |
 | [price_updater](#price_updater) | фоновый | — | PostgreSQL | MOEX ISS, dohod.ru | — |
 | [parser](#parser) | воркер очереди | 8084 (health) | S3, RabbitMQ | portfolio | RabbitMQ |
 | [notifier](#notifier) | gRPC + бот | 8085 | PostgreSQL | Telegram Bot API | gateway |
+| [feed](#feed) | gRPC | 8086 | PostgreSQL | — | gateway |
 
 Все сервисы: Go 1.24, JSON-логи
-в stdout, graceful shutdown, gRPC reflection включён (кроме gateway).
+в stdout, graceful shutdown, gRPC reflection включён у users, portfolio, securities_reader и notifier.
 
 ---
 
@@ -27,7 +28,7 @@
 |---|---|
 | Код | `backend/services/gateway` (точка входа — `cmd/main.go`) |
 | Внешний API | [REST API](api/openapi.md), [OpenAPI](api/openapi.yaml) |
-| Зависимости при старте | users, portfolio, securities_reader, notifier (healthy), RabbitMQ (healthy), s3-init (завершён) |
+| Зависимости при старте | users, portfolio, securities_reader, notifier, feed (healthy), RabbitMQ (healthy), s3-init (завершён) |
 | Health | `GET /healthz` — 200 или 503 с перечнем проблем 
 | Исходники | [gateway](../backend/services/gateway/) |
 
@@ -127,3 +128,15 @@ total_pnl = realized + unrealized
 | s3-init | `chrislusf/seaweedfs:4.06` | одноразово создаёт бакет `reports` | — |
 | rabbitmq | `rabbitmq:3-management-alpine` | очередь задач, management UI | без volume: durable-очередь и persistent-сообщения переживают рестарт, но не пересоздание контейнера |
 | caddy | `caddy:2-alpine` | HTTPS-прокси, только профиль `https` | volumes `caddy_data`, `caddy_config` (сертификаты) |
+
+## feed
+
+**Ответственность:** публикация и выдача новостей и прогнозов, фильтры по
+бумагам и оценкам авторов, расчёт рейтинга прогнозов по дневным свечам.
+
+| | |
+|---|---|
+| gRPC | `invest.feed.v1.FeedService`: `CreatePost`, `ListPosts` |
+| Внешний API | `GET /api/v1/feed` и `POST /api/v1/feed` через gateway |
+| Таблицы | `feed_posts`, представление `feed_author_scores`; читает пользователей, справочник бумаг и котировки |
+| Исходники | [feed](../backend/services/feed/) |

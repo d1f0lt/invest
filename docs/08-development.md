@@ -39,6 +39,25 @@ cd backend && docker compose up --build
 - API доступен на `http://localhost:8080`, RabbitMQ UI —
   `http://localhost:15672`, S3 — `localhost:9000`.
 
+При обновлении существующей локальной базы запустите PostgreSQL первым,
+примените миграции и затем пересоберите сервисы. Из каталога `backend`:
+
+```bash
+docker compose up -d --wait postgres
+docker compose exec -T postgres sh /opt/invest/run-migrations.sh
+docker compose up -d --build
+```
+
+Сервис `feed` становится healthy после появления схемы ленты, затем
+Compose запускает gateway.
+
+Локальный `docker-compose.override.yml` включает создание администратора
+с логином и паролем `admin` при запуске `users` после миграций.
+Пароль задаётся при первом создании и сохраняется в виде bcrypt-хеша.
+Переопределить начальный пароль можно через `BOOTSTRAP_ADMIN_PASSWORD`,
+а пустое значение отключает создание. В конфигурации развёртывания
+локальный override отсутствует.
+
 ## 8.3. Соглашения по коду
 
 ### Go

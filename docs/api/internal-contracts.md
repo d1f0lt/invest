@@ -112,6 +112,17 @@ message ImportReportRequest {
 Перечисления: `Direction` = `ABOVE` (`price >= target`) / `BELOW`
 (`price <= target`); `AlertStatus` = `ACTIVE` / `TRIGGERED`.
 
+## feed
+
+`invest.feed.v1.FeedService` · порт 8086 ·
+[`feed.proto`](../../backend/services/feed/proto/feed.proto).
+Gateway передаёт проверенный идентификатор пользователя через `x-user-id`.
+
+| RPC | Назначение |
+|---|---|
+| `CreatePost` | Валидирует новость или прогноз и сохраняет публикацию. Для прогноза фиксирует текущую цену. |
+| `ListPosts` | Возвращает новости и активные прогнозы с фильтрами и курсором по времени публикации и ID. |
+
 ## parser (health)
 
 Собственного API нет. Порт 8084 — только `grpc.health.v1.Health/Check`,

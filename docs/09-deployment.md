@@ -14,7 +14,7 @@ Staging-окружения нет. Характеристики сервера �
 
 | Workflow | Триггер | Что делает |
 |---|---|---|
-| [`backend`](../.github/workflows/backend.yml) | push в `main` и PR с изменениями в `backend/**`; вызывается из `deploy` | по матрице из 7 сервисов: генерация proto, `gofmt`, `go vet`, `go test -race`, `go build`; применение всех миграций к чистому PostgreSQL и интеграционные тесты storage `notifier`; сборка Docker-образов |
+| [`backend`](../.github/workflows/backend.yml) | push в `main` и PR с изменениями в `backend/**`; вызывается из `deploy` | по матрице из 8 сервисов: генерация proto, `gofmt`, `go vet`, `go test -race`, `go build`; применение всех миграций к чистому PostgreSQL и интеграционные тесты storage `notifier`; сборка Docker-образов |
 | [`mobile`](../.github/workflows/mobile.yml) | push в `main` и PR с изменениями в `mobile/**` | `flutter analyze`, сборка debug APK (артефакт хранится 7 дней) |
 | [`deploy`](../.github/workflows/deploy.yml) | тег `v*` или ручной запуск с указанием тега | CI → сборка и push 7 образов в GHCR → выкатка на сервер → проверка `/healthz` |
 | [`mobile-release`](../.github/workflows/mobile-release.yml) | тег `v*` | подписанный release APK → GitHub Release |
